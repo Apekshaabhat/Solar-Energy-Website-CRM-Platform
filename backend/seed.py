@@ -1,8 +1,9 @@
 """Seed database with realistic demo data for testing and development."""
 import logging
-from datetime import datetime, timezone
+import secrets
 
-from app.core.database import SessionLocal, Base, engine
+from app.core.config import settings
+from app.core.database import SessionLocal
 from app.core.security import get_password_hash
 from app.models.user import User
 from app.models.customer import Customer
@@ -19,19 +20,25 @@ logger = logging.getLogger("seed")
 
 
 def seed_data():
-    logger.info("Creating database tables if not present...")
-    Base.metadata.create_all(bind=engine)
-
     db = SessionLocal()
     try:
         # 1. Seed Users
         if db.query(User).count() == 0:
+            admin_password = (
+                settings.SEED_ADMIN_PASSWORD.get_secret_value()
+                if settings.SEED_ADMIN_PASSWORD
+                else ""
+            )
+            if len(admin_password) < 6:
+                raise RuntimeError(
+                    "Set SEED_ADMIN_PASSWORD in backend/.env to a value of at least 6 characters before seeding."
+                )
             logger.info("Seeding users...")
             users = [
                 User(
                     name="Alex Sterling",
                     email="admin@solara.com",
-                    password_hash=get_password_hash("admin123"),
+                    password_hash=get_password_hash(admin_password),
                     phone="+1 (555) 234-5678",
                     role="Admin",
                     status="Active",
@@ -39,7 +46,7 @@ def seed_data():
                 User(
                     name="Marcus Chen",
                     email="marcus.c@solara.com",
-                    password_hash=get_password_hash("password123"),
+                    password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98111 22334",
                     role="Manager",
                     status="Active",
@@ -47,7 +54,7 @@ def seed_data():
                 User(
                     name="Elena Rodriguez",
                     email="elena.r@solara.com",
-                    password_hash=get_password_hash("password123"),
+                    password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98222 33445",
                     role="Sales Rep",
                     status="Active",
@@ -55,7 +62,7 @@ def seed_data():
                 User(
                     name="David Kim",
                     email="david.k@solara.com",
-                    password_hash=get_password_hash("password123"),
+                    password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98333 44556",
                     role="Sales Rep",
                     status="Invited",
@@ -63,7 +70,7 @@ def seed_data():
                 User(
                     name="Priya Patel",
                     email="priya.p@solara.com",
-                    password_hash=get_password_hash("password123"),
+                    password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98444 55667",
                     role="Support",
                     status="Inactive",

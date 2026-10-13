@@ -1,4 +1,17 @@
+from datetime import timedelta
+
+from app.core.security import create_access_token
 from .conftest import auth_headers
+
+
+def test_seeded_admin_login_uses_dev_password(client):
+    response = client.post(
+        "/api/v1/auth/login",
+        json={"email": "admin@solara.com", "password": "admin123"},
+    )
+    assert response.status_code == 200
+    assert response.json()["user"]["email"] == "admin@solara.com"
+    assert response.json()["user"]["role"] == "Admin"
 
 
 def test_register_login_and_me(client):
@@ -13,6 +26,7 @@ def test_register_login_and_me(client):
     )
     assert response.status_code == 201
     assert response.json()["data"]["email"] == "asha@example.com"
+    assert response.json()["data"]["role"] == "Customer"
 
     duplicate = client.post(
         "/api/v1/auth/register",
@@ -36,6 +50,18 @@ def test_register_login_and_me(client):
     assert escalated.status_code == 201
     assert escalated.json()["data"]["role"] == "Customer"
 
+    first_admin_attempt = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "First User",
+            "email": "first@example.com",
+            "password": "password123",
+            "role": "Admin",
+        },
+    )
+    assert first_admin_attempt.status_code == 201
+    assert first_admin_attempt.json()["data"]["role"] == "Customer"
+
     login = client.post(
         "/api/v1/auth/login",
         json={"email": "asha@example.com", "password": "password123"},
@@ -46,6 +72,69 @@ def test_register_login_and_me(client):
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["data"]["name"] == "Asha Rao"
+
+
+def test_forgot_password_is_not_reported_as_sent_when_unconfigured(client):
+    response = client.post(
+        "/api/v1/auth/forgot-password",
+        json={"email": "user@example.com"},
+    )
+    assert response.status_code == 501
+
+
+def test_expired_access_token_is_rejected(client):
+    expired_token = create_access_token("1", expires_delta=timedelta(seconds=-1))
+    response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert response.status_code == 401
+
+
+def test_dashboard_summary_requires_valid_authentication(client):
+    path = "/api/v1/dashboard/summary"
+
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers={"Authorization": "Bearer invalid-token"}).status_code == 401
+
+    expired_token = create_access_token("1", expires_delta=timedelta(seconds=-1))
+    expired = client.get(
+        path,
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert expired.status_code == 401
+
+    authenticated = client.get(path, headers=auth_headers(client))
+    assert authenticated.status_code == 200
+
+
+def test_staff_dashboard_apis_require_valid_authentication(client):
+    paths = [
+        "/api/v1/dashboard/summary",
+        "/api/v1/customers",
+        "/api/v1/leads",
+        "/api/v1/site-surveys",
+        "/api/v1/site-surveys/export",
+        "/api/v1/calculators/submissions",
+        "/api/v1/users",
+        "/api/v1/settings",
+    ]
+    expired_token = create_access_token("1", expires_delta=timedelta(seconds=-1))
+    credential_headers = [
+        None,
+        {"Authorization": "Bearer invalid-token"},
+        {"Authorization": f"Bearer {expired_token}"},
+    ]
+
+    for path in paths:
+        for headers in credential_headers:
+            response = client.get(path, headers=headers)
+            assert response.status_code == 401, path
+
+    authenticated_headers = auth_headers(client)
+    for path in paths:
+        response = client.get(path, headers=authenticated_headers)
+        assert response.status_code == 200, path
 
 
 def test_public_lead_submission_and_staff_lead_management(client):
@@ -342,3 +431,23 @@ def test_frontend_service_contracts_for_admin_resources(client):
     staff_faqs = client.get("/api/v1/faqs", headers=headers)
     assert staff_faqs.status_code == 200
     assert len(staff_faqs.json()["data"]) == 2
+
+
+def test_site_survey_export_requires_staff_and_escapes_formulas(client):
+    payload = {
+        "customer_name": "=HYPERLINK(\"https://example.invalid\")",
+        "location": "Pune",
+        "survey_date": "2026-09-24",
+        "time_slot": "10:00 AM",
+        "assigned_to": "Priya",
+    }
+    created = client.post("/api/v1/site-surveys", json=payload)
+    assert created.status_code == 201
+
+    unauthenticated = client.get("/api/v1/site-surveys/export")
+    assert unauthenticated.status_code == 401
+
+    exported = client.get("/api/v1/site-surveys/export", headers=auth_headers(client))
+    assert exported.status_code == 200
+    assert exported.headers["content-type"].startswith("text/csv")
+    assert "'=HYPERLINK" in exported.text

@@ -64,10 +64,11 @@ Start the API:
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-The API is available at `http://localhost:8001`. Interactive API documentation is available at `http://localhost:8001/docs`.
-The default frontend API URL is `http://localhost:8001/api/v1`. If you use another port, set `VITE_API_BASE_URL` in `frontend/.env.local`.
+The API is available at `http://localhost:8001`.
+Interactive API documentation is available at `http://localhost:8001/docs`.
+The frontend expects the backend at `http://localhost:8001/api/v1` by default. If you run the API on a different port, set `VITE_API_BASE_URL` in `frontend/.env.local` to match that URL.
 
-If port `8000` is available in your environment, it can still be used by setting `VITE_API_BASE_URL` to the matching API URL. The repository default is `8001` because port `8000` may be reserved by another local process.
+If port `8000` is available in your environment, it can still be used by setting `VITE_API_BASE_URL` to the matching API URL. The repository default is `8001` because port `8000` may already be in use by another local process.
 
 ### 2. Start the frontend
 
@@ -79,7 +80,8 @@ npm ci
 npm run dev
 ```
 
-The frontend is available at `http://localhost:5173`. Set `VITE_API_BASE_URL` in `frontend/.env.local` when the API uses a different base URL. The default is `http://localhost:8000/api/v1`.
+The frontend is available at `http://localhost:5173`.
+Set `VITE_API_BASE_URL` in `frontend/.env.local` when the API uses a different base URL.
 
 ## CRM Workflows
 
@@ -108,13 +110,16 @@ cd frontend
 npm run lint
 npm run build
 ```
+
 ## Admin Login
+
 The seeded admin account in this project is:
 
 - Login ID / email: `admin@solara.com`
 - Password: `admin123`
 
 Change these seeded credentials before using the application outside local development.
+
 ## Environment Variables
 
 The backend reads configuration from `backend/.env`. Start with `backend/.env.example` and configure `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, and the token settings for your environment. Never commit real credentials or production secrets.

@@ -13,7 +13,7 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Configure `DATABASE_URL`, `SECRET_KEY`, and `CORS_ORIGINS` in `.env`. PostgreSQL is the default database for local development and production.
+Configure `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, and token settings in `.env`. Generate a unique `SECRET_KEY` of at least 32 characters; do not use the example placeholder. PostgreSQL is the default database for local development and production.
 
 ## Database
 
@@ -23,13 +23,13 @@ Apply all Alembic migrations before starting the API:
 alembic upgrade head
 ```
 
-Seed the local database with the admin account and sample CRM records:
+Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters in `.env`, then seed the local database with the admin account and sample CRM records:
 
 ```powershell
 python seed.py
 ```
 
-The seed account is `admin@solara.com` / `admin123`. Change it before using a non-local environment.
+The seed admin login is `admin@solara.com` and uses the password configured in `SEED_ADMIN_PASSWORD`. The seed script generates unknown random passwords for other sample users.
 
 ## Run
 

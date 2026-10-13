@@ -12,9 +12,10 @@ os.environ["DATABASE_URL"] = "sqlite:///./.test_solara.db"
 os.environ["SECRET_KEY"] = "test-secret-key-for-solara-api-suite"
 os.environ["ACCESS_TOKEN_EXPIRE_MINUTES"] = "60"
 
-from app.core.database import Base, engine  # noqa: E402
+from app.core.database import Base, SessionLocal, engine  # noqa: E402
 import app.models  # noqa: E402,F401
 from app.main import app  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +44,13 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
         },
     )
     assert register_response.status_code == 201
+
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.email == email).update({"role": "Admin"})
+        db.commit()
+    finally:
+        db.close()
 
     login_response = client.post(
         "/api/v1/auth/login",

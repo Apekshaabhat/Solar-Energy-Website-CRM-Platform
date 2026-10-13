@@ -1,6 +1,6 @@
 import math
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc, func
@@ -119,7 +119,7 @@ def create_customer(
         location=request.location.strip(),
         property_type=request.property_type,
         status=request.status or "Active",
-        customer_since=request.customer_since or datetime.utcnow().strftime("%d %b %Y"),
+        customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),
         assigned_user_id=request.assigned_user_id,
     )
     db.add(customer)

@@ -7,7 +7,13 @@ from app.models.user import User
 from app.schemas.dashboard import DashboardSummaryResponse
 from app.services.dashboard_service import DashboardService
 
-router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
+_dashboard_access = require_roles(["Admin", "Manager", "Sales Rep", "Support"])
+
+router = APIRouter(
+    prefix="/dashboard",
+    tags=["Dashboard"],
+    dependencies=[Depends(_dashboard_access)],
+)
 
 
 @router.get(
@@ -17,7 +23,7 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
     description="Returns stat cards, leads trend overview, leads by source distribution, recent leads, and recent activities calculated directly from the database.",
 )
 def get_dashboard_summary(
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
+    current_user: User = Depends(_dashboard_access),
     db: Session = Depends(get_db),
 ):
     return DashboardService.get_summary(db)
