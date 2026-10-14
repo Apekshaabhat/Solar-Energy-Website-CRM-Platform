@@ -25,3 +25,5 @@ class Lead(Base):
     # Relationships
     assigned_user = relationship("User", back_populates="leads", foreign_keys=[assigned_user_id])
     customer = relationship("Customer", back_populates="leads", foreign_keys=[customer_id])
+    site_surveys = relationship("SiteSurvey", back_populates="lead")
+    projects = relationship("Project", back_populates="source_lead")

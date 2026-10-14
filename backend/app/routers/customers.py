@@ -1,6 +1,6 @@
 import math
-from typing import Optional
-from datetime import datetime, timezone
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
@@ -10,8 +10,17 @@ from app.dependencies.auth import require_roles
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.project import Project
-from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
+from app.models.lead import Lead
+from app.models.site_survey import SiteSurvey
+from app.models.activity import Activity
+from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse, CustomerOverviewResponse
+from app.schemas.lead import LeadResponse
+from app.schemas.site_survey import SiteSurveyResponse
+from app.schemas.project import ProjectResponse
+from app.schemas.activity import ActivityResponse
 from app.schemas.common import APIResponse, PaginatedResponse, PaginationMeta
+from app.services.crm_service import CRMService
+from app.services.dashboard_service import format_relative_time
 
 router = APIRouter(prefix="/customers", tags=["Customers Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
@@ -99,7 +108,6 @@ def list_customers(
     items = []
     for c in customers:
         resp = CustomerResponse.model_validate(c)
-        # Compute real project count
         resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == c.id).scalar() or 0
         items.append(resp)
 
@@ -144,12 +152,116 @@ def create_customer(
         assigned_user_id=assigned_user_id,
     )
     db.add(customer)
+    db.flush()
+
+    CRMService.record_activity(
+        db=db,
+        entity_type="customer",
+        entity_id=customer.id,
+        action="created",
+        title=f"Customer created: {customer.name}",
+        description=f"Location: {customer.location}, Property: {customer.property_type}",
+        customer_id=customer.id,
+        customer_name=customer.name,
+        user_id=current_user.id,
+        status_val=customer.status,
+    )
+
     db.commit()
     db.refresh(customer)
 
     resp = CustomerResponse.model_validate(customer)
     resp.total_projects = 0
     return APIResponse(success=True, message="Customer created successfully", data=resp)
+
+
+@router.get(
+    "/{customer_id}/overview",
+    response_model=APIResponse[CustomerOverviewResponse],
+    summary="Get central customer record with all linked CRM entities",
+)
+def get_customer_overview(
+    customer_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    overview_data = CRMService.get_customer_overview(db, customer_id)
+    return APIResponse(success=True, data=CustomerOverviewResponse(**overview_data))
+
+
+@router.get(
+    "/{customer_id}/leads",
+    response_model=APIResponse[List[LeadResponse]],
+    summary="Get all leads for customer",
+)
+def get_customer_leads(
+    customer_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    leads = db.query(Lead).filter(Lead.customer_id == customer_id).order_by(desc(Lead.created_at)).all()
+    items = []
+    for l in leads:
+        r = LeadResponse.model_validate(l)
+        r.date = l.created_at.strftime("%d %b %Y") if l.created_at else "Recently"
+        r.customer_name = l.customer.name if l.customer else None
+        items.append(r)
+    return APIResponse(success=True, data=items)
+
+
+@router.get(
+    "/{customer_id}/site-surveys",
+    response_model=APIResponse[List[SiteSurveyResponse]],
+    summary="Get all site surveys for customer",
+)
+def get_customer_site_surveys(
+    customer_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    surveys = db.query(SiteSurvey).filter(SiteSurvey.customer_id == customer_id).order_by(desc(SiteSurvey.created_at)).all()
+    return APIResponse(success=True, data=[SiteSurveyResponse.model_validate(s) for s in surveys])
+
+
+@router.get(
+    "/{customer_id}/projects",
+    response_model=APIResponse[List[ProjectResponse]],
+    summary="Get all projects for customer",
+)
+def get_customer_projects(
+    customer_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    projects = db.query(Project).filter(Project.customer_id == customer_id).order_by(desc(Project.created_at)).all()
+    items = []
+    for p in projects:
+        r = ProjectResponse.model_validate(p)
+        if p.customer:
+            r.customer_name = p.customer.name
+        if p.source_lead:
+            r.source_lead_name = p.source_lead.name
+        items.append(r)
+    return APIResponse(success=True, data=items)
+
+
+@router.get(
+    "/{customer_id}/activities",
+    response_model=APIResponse[List[ActivityResponse]],
+    summary="Get all activities for customer",
+)
+def get_customer_activities(
+    customer_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    activities = db.query(Activity).filter(Activity.customer_id == customer_id).order_by(desc(Activity.created_at)).all()
+    items = []
+    for a in activities:
+        r = ActivityResponse.model_validate(a)
+        r.time_ago = format_relative_time(a.created_at)
+        items.append(r)
+    return APIResponse(success=True, data=items)
 
 
 @router.get(
@@ -185,6 +297,7 @@ def update_customer(
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
 
+    old_status = customer.status
     update_data = request.model_dump(exclude_unset=True)
     if (
         "assigned_user_id" in update_data
@@ -198,6 +311,19 @@ def update_customer(
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_customer_update(customer, update_data)
 
+    if customer.status != old_status:
+        CRMService.record_activity(
+            db=db,
+            entity_type="customer",
+            entity_id=customer.id,
+            action="status_changed",
+            title=f"Customer status updated to {customer.status}: {customer.name}",
+            customer_id=customer.id,
+            customer_name=customer.name,
+            user_id=current_user.id,
+            status_val=customer.status,
+        )
+
     db.commit()
     db.refresh(customer)
 
@@ -209,7 +335,7 @@ def update_customer(
 @router.delete(
     "/{customer_id}",
     response_model=APIResponse[bool],
-    summary="Delete customer",
+    summary="Inactivate customer (soft transition preserving history)",
 )
 def delete_customer(
     customer_id: int,
@@ -220,6 +346,19 @@ def delete_customer(
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
 
-    db.delete(customer)
+    customer.status = "Inactive"
+    CRMService.record_activity(
+        db=db,
+        entity_type="customer",
+        entity_id=customer.id,
+        action="inactivated",
+        title=f"Customer marked inactive: {customer.name}",
+        description="Customer marked as Inactive; CRM history preserved",
+        customer_id=customer.id,
+        customer_name=customer.name,
+        user_id=current_user.id,
+        status_val="Inactive",
+    )
     db.commit()
-    return APIResponse(success=True, message="Customer deleted successfully", data=True)
+    return APIResponse(success=True, message="Customer marked inactive successfully (history preserved)", data=True)
+

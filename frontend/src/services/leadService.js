@@ -36,4 +36,40 @@ export const leadService = {
     const response = await apiRequest(`/leads/${id}`, { method: "DELETE" });
     return unwrapData(response);
   },
+
+  async contactLead(id) {
+    const response = await apiRequest(`/leads/${id}/contact`, {
+      method: "POST",
+    });
+    return unwrapData(response);
+  },
+
+  async scheduleSurvey(id, payload) {
+    const response = await apiRequest(`/leads/${id}/schedule-survey`, {
+      method: "POST",
+      body: payload,
+    });
+    return unwrapData(response);
+  },
+
+  async convertLead(id, payload) {
+    const response = await apiRequest(`/leads/${id}/convert`, {
+      method: "POST",
+      body: payload,
+    });
+    return unwrapData(response);
+  },
+
+  async cancelLead(id, status = "Cancelled") {
+    const response = await apiRequest(`/leads/${id}/cancel?status_val=${encodeURIComponent(status)}`, {
+      method: "POST",
+    });
+    return unwrapData(response);
+  },
+
+  async getLeadRelatedData(id) {
+    const response = await apiRequest(`/leads/${id}/related-data`);
+    return unwrapData(response);
+  },
 };
+

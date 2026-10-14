@@ -66,6 +66,7 @@ class ProjectBase(BaseModel):
 
 class ProjectCreate(ProjectBase):
     customer_id: Optional[int] = Field(default=None, ge=1)
+    source_lead_id: Optional[int] = Field(default=None, ge=1)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
 
 
@@ -77,6 +78,7 @@ class ProjectUpdate(BaseModel):
     capacity_kw: Optional[float] = Field(default=None, ge=0, le=100_000)
     status: Optional[str] = None
     customer_id: Optional[int] = Field(default=None, ge=1)
+    source_lead_id: Optional[int] = Field(default=None, ge=1)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     image_url: Optional[str] = Field(default=None, max_length=500)
     is_public: Optional[bool] = None
@@ -123,8 +125,10 @@ class ProjectUpdate(BaseModel):
 class ProjectResponse(ProjectBase):
     id: int
     customer_id: Optional[int] = None
+    source_lead_id: Optional[int] = None
     assigned_user_id: Optional[int] = None
     customer_name: Optional[str] = None
+    source_lead_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 

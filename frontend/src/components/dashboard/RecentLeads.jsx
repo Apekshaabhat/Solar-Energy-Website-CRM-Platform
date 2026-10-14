@@ -2,9 +2,9 @@ import { useNavigate } from "react-router-dom";
 import StatusBadge from "./StatusBadge";
 import { allLeads } from "../../data/dashboardData";
 
-export default function RecentLeads() {
+export default function RecentLeads({ leads = [] }) {
   const navigate = useNavigate();
-  const rows = allLeads.slice(0, 5);
+  const rows = leads && leads.length > 0 ? leads.slice(0, 5) : allLeads.slice(0, 5);
   return (
     <div className="bg-white dark:bg-[#17221B] rounded-2xl border border-line dark:border-[#293227] p-5 sm:p-6">
       <div className="flex items-center justify-between mb-4">

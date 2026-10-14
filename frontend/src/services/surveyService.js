@@ -32,6 +32,32 @@ export const surveyService = {
     return toSurvey(unwrapData(response));
   },
 
+  async startSurvey(id) {
+    const response = await apiRequest(`/site-surveys/${id}/start`, {
+      method: "POST",
+    });
+    return toSurvey(unwrapData(response));
+  },
+
+  async completeSurvey(id, payload = {}) {
+    const response = await apiRequest(`/site-surveys/${id}/complete`, {
+      method: "POST",
+      body: {
+        roof_information: payload.roofInformation ?? payload.roof_information,
+        capacity_estimate: payload.capacityEstimate ?? payload.capacity_estimate,
+        notes: payload.notes,
+      },
+    });
+    return unwrapData(response);
+  },
+
+  async cancelSurvey(id) {
+    const response = await apiRequest(`/site-surveys/${id}/cancel`, {
+      method: "POST",
+    });
+    return toSurvey(unwrapData(response));
+  },
+
   async deleteSurvey(id) {
     const response = await apiRequest(`/site-surveys/${id}`, { method: "DELETE" });
     return unwrapData(response);

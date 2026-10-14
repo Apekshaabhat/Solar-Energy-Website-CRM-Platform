@@ -1,10 +1,12 @@
-from fastapi import APIRouter, Depends
+from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies.auth import require_roles
 from app.models.user import User
 from app.schemas.dashboard import DashboardSummaryResponse
+from app.schemas.common import APIResponse
 from app.services.dashboard_service import DashboardService
 
 _dashboard_access = require_roles(["Admin", "Manager", "Sales Rep", "Support"])
@@ -27,3 +29,17 @@ def get_dashboard_summary(
     db: Session = Depends(get_db),
 ):
     return DashboardService.get_summary(db)
+
+
+@router.get(
+    "/activities",
+    response_model=APIResponse[List[Dict[str, Any]]],
+    summary="Get real-time CRM activity feed",
+)
+def get_dashboard_activities(
+    limit: int = Query(20, ge=1, le=100),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
+    db: Session = Depends(get_db),
+):
+    activities = DashboardService.get_activities(db, limit=limit)
+    return APIResponse(success=True, data=activities)

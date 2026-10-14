@@ -59,7 +59,15 @@ class SiteSurveyBase(BaseModel):
 class SiteSurveyCreate(SiteSurveyBase):
     customer_id: Optional[int] = Field(default=None, ge=1)
     project_id: Optional[int] = Field(default=None, ge=1)
+    lead_id: Optional[int] = Field(default=None, ge=1)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
+
+
+class SiteSurveyCompleteRequest(BaseModel):
+    roof_information: Optional[str] = Field(default=None, max_length=2000)
+    capacity_estimate: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
 
 
 class SiteSurveyUpdate(BaseModel):
@@ -72,6 +80,7 @@ class SiteSurveyUpdate(BaseModel):
     status: Optional[str] = None
     customer_id: Optional[int] = Field(default=None, ge=1)
     project_id: Optional[int] = Field(default=None, ge=1)
+    lead_id: Optional[int] = Field(default=None, ge=1)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     roof_information: Optional[str] = Field(default=None, max_length=2000)
     capacity_estimate: Optional[str] = Field(default=None, max_length=50)
@@ -110,6 +119,7 @@ class SiteSurveyResponse(SiteSurveyBase):
     id: int
     customer_id: Optional[int] = None
     project_id: Optional[int] = None
+    lead_id: Optional[int] = None
     assigned_user_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime

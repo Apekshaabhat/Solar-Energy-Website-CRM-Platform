@@ -4,6 +4,7 @@ from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.project import Project
 from app.models.site_survey import SiteSurvey
+from app.models.activity import Activity
 from app.models.blog import BlogPost
 from app.models.faq import FAQ
 from app.models.calculator import CalculatorSubmission, CalculatorSettings
@@ -16,6 +17,7 @@ __all__ = [
     "Lead",
     "Project",
     "SiteSurvey",
+    "Activity",
     "BlogPost",
     "FAQ",
     "CalculatorSubmission",

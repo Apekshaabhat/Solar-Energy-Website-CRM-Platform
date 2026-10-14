@@ -57,6 +57,7 @@ export function toSurvey(row) {
     timeSlot: row.time_slot ?? row.timeSlot,
     assignedTo: row.assigned_to ?? row.assignedTo,
     customerId: row.customer_id ?? row.customerId,
+    leadId: row.lead_id ?? row.leadId,
     projectId: row.project_id ?? row.projectId,
     assignedUserId: row.assigned_user_id ?? row.assignedUserId,
     roofInformation: row.roof_information ?? row.roofInformation,
@@ -74,6 +75,7 @@ export function toSurveyPayload(form) {
     assigned_to: form.assignedTo ?? form.assigned_to ?? "Rahul",
     status: form.status ?? "Scheduled",
     customer_id: form.customerId ?? form.customer_id,
+    lead_id: form.leadId ?? form.lead_id,
     project_id: form.projectId ?? form.project_id,
     assigned_user_id: form.assignedUserId ?? form.assigned_user_id,
     roof_information: form.roofInformation ?? form.roof_information,
@@ -87,6 +89,7 @@ export function toProject(row) {
     ...row,
     capacityKW: row.capacity_kw ?? row.capacityKW,
     customerId: row.customer_id ?? row.customerId,
+    sourceLeadId: row.source_lead_id ?? row.sourceLeadId,
     assignedUserId: row.assigned_user_id ?? row.assignedUserId,
     customerName: row.customer_name ?? row.customerName,
     imageUrl: row.image_url ?? row.imageUrl,
@@ -107,6 +110,7 @@ export function toProjectPayload(form) {
     capacity_kw: form.capacityKW ?? form.capacity_kw,
     status: form.status ?? "In Progress",
     customer_id: form.customerId ?? form.customer_id,
+    source_lead_id: form.sourceLeadId ?? form.source_lead_id,
     assigned_user_id: form.assignedUserId ?? form.assigned_user_id,
     image_url: form.imageUrl ?? form.image_url,
     is_public: form.isPublic ?? form.is_public ?? true,
@@ -114,6 +118,17 @@ export function toProjectPayload(form) {
     actual_cost: form.actualCost ?? form.actual_cost,
     start_date: form.startDate ?? form.start_date,
     completion_date: form.completionDate ?? form.completion_date,
+  };
+}
+
+export function toActivity(row) {
+  return {
+    ...row,
+    entityType: row.entity_type ?? row.entityType,
+    entityId: row.entity_id ?? row.entityId,
+    customerId: row.customer_id ?? row.customerId,
+    customerName: row.customer_name ?? row.customerName,
+    createdAt: row.created_at ?? row.createdAt,
   };
 }
 

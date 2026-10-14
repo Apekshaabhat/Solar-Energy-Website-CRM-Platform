@@ -1,0 +1,3 @@
+# SOLARA Root Requirements File
+# Points to backend/requirements.txt for ease of installation from root or backend directory
+-r backend/requirements.txt

@@ -14,6 +14,7 @@ class Project(Base):
     capacity_kw = Column(Float, nullable=True)
     status = Column(String(50), default="In Progress", nullable=False)  # Planning, In Progress, Completed, On Hold, Cancelled
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
+    source_lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     image_url = Column(String(500), nullable=True)
     is_public = Column(Boolean, default=True, nullable=False)
@@ -26,5 +27,6 @@ class Project(Base):
 
     # Relationships
     customer = relationship("Customer", back_populates="projects", foreign_keys=[customer_id])
+    source_lead = relationship("Lead", back_populates="projects", foreign_keys=[source_lead_id])
     assigned_user = relationship("User", back_populates="projects", foreign_keys=[assigned_user_id])
     site_surveys = relationship("SiteSurvey", back_populates="project")

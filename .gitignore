@@ -164,8 +164,14 @@ htmlcov/
 
 # Local databases
 *.db
+.*.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite-journal
+*.sqlite3-journal
 
 # Local IDE and OS files
 .idea/
@@ -175,6 +181,16 @@ htmlcov/
 !.vscode/extensions.json
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# AI assistant and scratch files
+.agents/
+.gemini/
+scratch/
 
 # Local developer configuration
 .python-version
@@ -183,3 +199,4 @@ Thumbs.db
 # Backend runtime files
 *.pid
 *.seed
+

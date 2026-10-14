@@ -1,3 +1,4 @@
+from typing import Optional
 from typing import List
 from pydantic import BaseModel, Field
 
@@ -40,6 +41,9 @@ class RecentActivityItem(BaseModel):
     time: str
     icon: str
     tint: str
+    entity_type: Optional[str] = None
+    entity_id: Optional[int] = None
+    status: Optional[str] = None
 
 
 class DashboardSummaryResponse(BaseModel):
@@ -48,3 +52,4 @@ class DashboardSummaryResponse(BaseModel):
     leadsBySource: List[SourceDonutItem] = Field(default_factory=list)
     recentLeads: List[RecentLeadItem] = Field(default_factory=list)
     recentActivity: List[RecentActivityItem] = Field(default_factory=list)
+    metrics: Optional[dict] = Field(default_factory=dict)

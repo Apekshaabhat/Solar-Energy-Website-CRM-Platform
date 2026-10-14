@@ -73,7 +73,7 @@ export const recentActivity = [
   { id: 3, title: "Project marked as completed", subtitle: "Green Tech Solutions", time: "1 hour ago", icon: "check", tint: "bg-leaf-600" },
 ];
 
-export const leadsTabOrder = ["All Leads", "New", "Contacted", "Site Survey", "Quoted", "Converted", "Lost"];
+export const leadsTabOrder = ["All Leads", "New", "Contacted", "Site Survey", "Quoted", "Converted", "Cancelled", "Lost"];
 
 export const allLeads = [
   { id: 1, name: "Rohan Patil", contact: "+91 98765 43210", location: "Mumbai", propertyType: "Residential", source: "Website", status: "New", createdAt: "12 Sep 2026" },
@@ -97,7 +97,7 @@ export const customers = [
   { id: 8, name: "Anjali Kulkarni", contact: "+91 88776 55443", location: "Solapur", propertyType: "Residential", totalProjects: 0, customerSince: "28 May 2026", status: "Inactive" },
 ];
 
-export const surveyTabOrder = ["All Surveys", "Scheduled", "Completed", "Cancelled"];
+export const surveyTabOrder = ["All Surveys", "Scheduled", "In Progress", "Completed", "Cancelled"];
 
 export const siteSurveys = [
   { id: 1, customerName: "Rohan Patil", location: "Mumbai", propertyType: "Residential", surveyDate: "15 Sep 2026", timeSlot: "10:00 AM", assignedTo: "Rahul", status: "Scheduled" },

@@ -100,15 +100,16 @@ def seed_data():
         # 3. Seed Leads
         if db.query(Lead).count() == 0:
             logger.info("Seeding leads...")
+            cust_by_name = {c.name: c.id for c in db.query(Customer).all()}
             leads = [
-                Lead(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", source="Website", status="New", estimated_value=250000.0),
-                Lead(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", source="Google Ads", status="Contacted", estimated_value=850000.0),
-                Lead(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", source="Referral", status="Site Survey", estimated_value=320000.0),
-                Lead(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", source="Website", status="Quoted", estimated_value=1500000.0),
-                Lead(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", source="Social Media", status="Converted", estimated_value=400000.0),
-                Lead(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", source="Website", status="Lost", estimated_value=200000.0),
-                Lead(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", source="Google Ads", status="New", estimated_value=1200000.0),
-                Lead(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", source="Referral", status="Contacted", estimated_value=280000.0),
+                Lead(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", source="Website", status="New", estimated_value=250000.0, customer_id=cust_by_name.get("Rohan Patil")),
+                Lead(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", source="Google Ads", status="Contacted", estimated_value=850000.0, customer_id=cust_by_name.get("Sneha Sharma")),
+                Lead(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", source="Referral", status="Site Survey", estimated_value=320000.0, customer_id=cust_by_name.get("Amit Verma")),
+                Lead(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", source="Website", status="Quoted", estimated_value=1500000.0, customer_id=cust_by_name.get("Priya Desai")),
+                Lead(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", source="Social Media", status="Converted", estimated_value=400000.0, customer_id=cust_by_name.get("Karan Mehta")),
+                Lead(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", source="Website", status="Lost", estimated_value=200000.0, customer_id=cust_by_name.get("Neha Gupta")),
+                Lead(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", source="Google Ads", status="New", estimated_value=1200000.0, customer_id=cust_by_name.get("Vikram Singh")),
+                Lead(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", source="Referral", status="Contacted", estimated_value=280000.0, customer_id=cust_by_name.get("Anjali Kulkarni")),
             ]
             db.add_all(leads)
             db.commit()
@@ -118,9 +119,11 @@ def seed_data():
             logger.info("Seeding projects...")
             cust1 = db.query(Customer).filter(Customer.name == "Rohan Patil").first()
             cust2 = db.query(Customer).filter(Customer.name == "Sneha Sharma").first()
+            lead1 = db.query(Lead).filter(Lead.name == "Rohan Patil").first()
+            lead2 = db.query(Lead).filter(Lead.name == "Sneha Sharma").first()
             projects = [
-                Project(name="Green Valley Solar Residence", category="Residential", location="Pune, Maharashtra", capacity="12 kW", capacity_kw=12.0, status="In Progress", customer_id=cust1.id if cust1 else None, image_url="https://placehold.co/400x280/E8F0EC/1F5C3E?text=Residential+Project", is_public=True),
-                Project(name="Apex Logistics Hub", category="Commercial", location="Navi Mumbai, Maharashtra", capacity="250 kW", capacity_kw=250.0, status="Completed", customer_id=cust2.id if cust2 else None, image_url="https://placehold.co/400x280/FDF3E0/1F5C3E?text=Commercial+Project", is_public=True),
+                Project(name="Green Valley Solar Residence", category="Residential", location="Pune, Maharashtra", capacity="12 kW", capacity_kw=12.0, status="In Progress", customer_id=cust1.id if cust1 else None, source_lead_id=lead1.id if lead1 else None, image_url="https://placehold.co/400x280/E8F0EC/1F5C3E?text=Residential+Project", is_public=True),
+                Project(name="Apex Logistics Hub", category="Commercial", location="Navi Mumbai, Maharashtra", capacity="250 kW", capacity_kw=250.0, status="Completed", customer_id=cust2.id if cust2 else None, source_lead_id=lead2.id if lead2 else None, image_url="https://placehold.co/400x280/FDF3E0/1F5C3E?text=Commercial+Project", is_public=True),
                 Project(name="Summit Steel Heavy Microgrid", category="Industrial", location="Nagpur, Maharashtra", capacity="750 kW", capacity_kw=750.0, status="Planning", image_url="https://placehold.co/400x280/E9EEF5/1F5C3E?text=Industrial+Project", is_public=True),
                 Project(name="Skyline Eco Apartments", category="Residential", location="Bengaluru, Karnataka", capacity="45 kW", capacity_kw=45.0, status="Completed", image_url="https://placehold.co/400x280/E8F0EC/1F5C3E?text=Residential+Project", is_public=True),
                 Project(name="Horizon Tech Park Array", category="Commercial", location="Hyderabad, Telangana", capacity="180 kW", capacity_kw=180.0, status="Completed", image_url="https://placehold.co/400x280/FDF3E0/1F5C3E?text=Commercial+Project", is_public=True),
@@ -132,15 +135,17 @@ def seed_data():
         # 5. Seed Site Surveys
         if db.query(SiteSurvey).count() == 0:
             logger.info("Seeding site surveys...")
+            cust_by_name = {c.name: c.id for c in db.query(Customer).all()}
+            lead_by_cust = {l.customer_id: l.id for l in db.query(Lead).filter(Lead.customer_id.isnot(None)).all()}
             surveys = [
-                SiteSurvey(customer_name="Rohan Patil", location="Mumbai", property_type="Residential", survey_date="15 Sep 2026", time_slot="10:00 AM", assigned_to="Rahul", status="Scheduled"),
-                SiteSurvey(customer_name="Sneha Sharma", location="Pune", property_type="Commercial", survey_date="16 Sep 2026", time_slot="11:30 AM", assigned_to="Priya", status="Completed"),
-                SiteSurvey(customer_name="Amit Verma", location="Nashik", property_type="Residential", survey_date="17 Sep 2026", time_slot="02:00 PM", assigned_to="Karan", status="Scheduled"),
-                SiteSurvey(customer_name="Priya Desai", location="Thane", property_type="Industrial", survey_date="18 Sep 2026", time_slot="10:30 AM", assigned_to="Neha", status="In Progress"),
-                SiteSurvey(customer_name="Karan Mehta", location="Mumbai", property_type="Residential", survey_date="19 Sep 2026", time_slot="01:00 PM", assigned_to="Rahul", status="Completed"),
-                SiteSurvey(customer_name="Neha Gupta", location="Pune", property_type="Residential", survey_date="20 Sep 2026", time_slot="03:00 PM", assigned_to="Priya", status="Scheduled"),
-                SiteSurvey(customer_name="Vikram Singh", location="Nagpur", property_type="Commercial", survey_date="21 Sep 2026", time_slot="11:00 AM", assigned_to="Karan", status="Cancelled"),
-                SiteSurvey(customer_name="Anjali Kulkarni", location="Solapur", property_type="Residential", survey_date="22 Sep 2026", time_slot="04:00 PM", assigned_to="Neha", status="Scheduled"),
+                SiteSurvey(customer_name="Rohan Patil", location="Mumbai", property_type="Residential", survey_date="15 Sep 2026", time_slot="10:00 AM", assigned_to="Rahul", status="Scheduled", customer_id=cust_by_name.get("Rohan Patil"), lead_id=lead_by_cust.get(cust_by_name.get("Rohan Patil"))),
+                SiteSurvey(customer_name="Sneha Sharma", location="Pune", property_type="Commercial", survey_date="16 Sep 2026", time_slot="11:30 AM", assigned_to="Priya", status="Completed", customer_id=cust_by_name.get("Sneha Sharma"), lead_id=lead_by_cust.get(cust_by_name.get("Sneha Sharma"))),
+                SiteSurvey(customer_name="Amit Verma", location="Nashik", property_type="Residential", survey_date="17 Sep 2026", time_slot="02:00 PM", assigned_to="Karan", status="Scheduled", customer_id=cust_by_name.get("Amit Verma"), lead_id=lead_by_cust.get(cust_by_name.get("Amit Verma"))),
+                SiteSurvey(customer_name="Priya Desai", location="Thane", property_type="Industrial", survey_date="18 Sep 2026", time_slot="10:30 AM", assigned_to="Neha", status="In Progress", customer_id=cust_by_name.get("Priya Desai"), lead_id=lead_by_cust.get(cust_by_name.get("Priya Desai"))),
+                SiteSurvey(customer_name="Karan Mehta", location="Mumbai", property_type="Residential", survey_date="19 Sep 2026", time_slot="01:00 PM", assigned_to="Rahul", status="Completed", customer_id=cust_by_name.get("Karan Mehta"), lead_id=lead_by_cust.get(cust_by_name.get("Karan Mehta"))),
+                SiteSurvey(customer_name="Neha Gupta", location="Pune", property_type="Residential", survey_date="20 Sep 2026", time_slot="03:00 PM", assigned_to="Priya", status="Scheduled", customer_id=cust_by_name.get("Neha Gupta"), lead_id=lead_by_cust.get(cust_by_name.get("Neha Gupta"))),
+                SiteSurvey(customer_name="Vikram Singh", location="Nagpur", property_type="Commercial", survey_date="21 Sep 2026", time_slot="11:00 AM", assigned_to="Karan", status="Cancelled", customer_id=cust_by_name.get("Vikram Singh"), lead_id=lead_by_cust.get(cust_by_name.get("Vikram Singh"))),
+                SiteSurvey(customer_name="Anjali Kulkarni", location="Solapur", property_type="Residential", survey_date="22 Sep 2026", time_slot="04:00 PM", assigned_to="Neha", status="Scheduled", customer_id=cust_by_name.get("Anjali Kulkarni"), lead_id=lead_by_cust.get(cust_by_name.get("Anjali Kulkarni"))),
             ]
             db.add_all(surveys)
             db.commit()

@@ -15,7 +15,8 @@ class SiteSurvey(Base):
     assigned_to = Column(String(100), default="Rahul", nullable=False)  # Surveyor name string
     status = Column(String(50), default="Scheduled", nullable=False)  # Scheduled, In Progress, Completed, Cancelled
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     roof_information = Column(Text, nullable=True)
     capacity_estimate = Column(String(50), nullable=True)
@@ -26,4 +27,5 @@ class SiteSurvey(Base):
     # Relationships
     customer = relationship("Customer", back_populates="site_surveys", foreign_keys=[customer_id])
     project = relationship("Project", back_populates="site_surveys", foreign_keys=[project_id])
+    lead = relationship("Lead", back_populates="site_surveys", foreign_keys=[lead_id])
     assigned_user = relationship("User", back_populates="site_surveys", foreign_keys=[assigned_user_id])

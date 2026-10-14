@@ -24,3 +24,4 @@ class Customer(Base):
     projects = relationship("Project", back_populates="customer")
     site_surveys = relationship("SiteSurvey", back_populates="customer")
     leads = relationship("Lead", back_populates="customer")
+    activities = relationship("Activity", back_populates="customer", cascade="all, delete-orphan")

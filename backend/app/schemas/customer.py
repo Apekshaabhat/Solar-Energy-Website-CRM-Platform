@@ -108,3 +108,10 @@ class CustomerResponse(CustomerBase):
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerOverviewResponse(CustomerResponse):
+    leads: list[dict] = []
+    site_surveys: list[dict] = []
+    projects: list[dict] = []
+    activities: list[dict] = []

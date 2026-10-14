@@ -16,7 +16,8 @@ LEAD_SOURCES = {
     "Direct Enquiry",
     "Google Ads",
 }
-LEAD_STATUSES = {"New", "Contacted", "Site Survey", "Quoted", "Converted", "Lost"}
+LEAD_STATUSES = {"New", "Contacted", "Site Survey", "Quoted", "Converted", "Cancelled", "Lost"}
+
 
 
 def validate_choice(value: Optional[str], allowed: set[str], field_name: str) -> Optional[str]:
@@ -126,10 +127,32 @@ class LeadUpdate(BaseModel):
         return validate_choice(value, LEAD_STATUSES, "status")
 
 
+class LeadScheduleSurveyRequest(BaseModel):
+    survey_date: str = Field(..., min_length=3, max_length=50)
+    time_slot: str = Field(default="10:00 AM", max_length=50)
+    assigned_to: str = Field(default="Rahul", max_length=100)
+    roof_information: Optional[str] = Field(default=None, max_length=2000)
+    capacity_estimate: Optional[str] = Field(default=None, max_length=50)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
+class LeadConvertRequest(BaseModel):
+    project_name: Optional[str] = Field(default=None, max_length=200)
+    category: Optional[str] = None
+    capacity: Optional[str] = Field(default=None, max_length=50)
+    capacity_kw: Optional[float] = Field(default=None, ge=0, le=100_000)
+    estimated_cost: Optional[float] = Field(default=None, ge=0, le=1_000_000_000)
+    actual_cost: Optional[float] = Field(default=None, ge=0, le=1_000_000_000)
+    is_public: Optional[bool] = True
+
+
 class LeadResponse(LeadBase):
     id: int
     assigned_user_id: Optional[int] = None
     customer_id: Optional[int] = None
+    customer_name: Optional[str] = None
+    surveys_count: Optional[int] = 0
+    projects_count: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
     # Helper formatted date for frontend matching
