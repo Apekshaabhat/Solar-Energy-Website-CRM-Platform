@@ -10,7 +10,7 @@ import Modal from "../../components/dashboard/Modal";
 import { FormField, TextInput, SelectInput } from "../../components/dashboard/FormField";
 import { surveyTabOrder } from "../../data/dashboardData";
 import { todayISO } from "../../utils/dashboardDate";
-import { surveyService } from "../../services/surveyService";
+import { siteSurveysApi } from "../../api/siteSurveys";
 import { useDashboardData } from "../../context/DashboardDataContext";
 
 const tabFilterMap = {
@@ -107,8 +107,8 @@ export default function SiteSurveys() {
       if (surveyorFilter && surveyorFilter !== "All Surveyors") params.surveyor = surveyorFilter;
       if (propertyFilter && propertyFilter !== "All Property Types") params.property_type = propertyFilter;
 
-      const response = await surveyService.getSurveys(params);
-      const items = Array.isArray(response.items) ? response.items : [];
+      const response = await siteSurveysApi.getSiteSurveys(params);
+      const items = Array.isArray(response.items) ? response.items : (Array.isArray(response) ? response : []);
       setSurveys(items);
       setTabCounts(response.tabCounts ?? response.tab_counts ?? {});
     } catch (err) {
@@ -135,13 +135,7 @@ export default function SiteSurveys() {
       if (surveyorFilter && surveyorFilter !== "All Surveyors") params.surveyor = surveyorFilter;
       if (propertyFilter && propertyFilter !== "All Property Types") params.property_type = propertyFilter;
 
-      const blob = await surveyService.exportSurveys(params);
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "site-surveys.csv";
-      link.click();
-      URL.revokeObjectURL(url);
+      await siteSurveysApi.exportCSV(params);
     } catch (err) {
       setExportError(err.message || "Unable to export site surveys.");
     } finally {
@@ -160,7 +154,7 @@ export default function SiteSurveys() {
     setLoadError("");
     setMessage("");
     try {
-      await surveyService.startSurvey(survey.id);
+      await siteSurveysApi.startSiteSurvey(survey.id);
       setMessage(`Survey #${survey.id} is now In Progress.`);
       notifyCrmChange("site_surveys");
       await loadSurveys();
@@ -189,7 +183,11 @@ export default function SiteSurveys() {
     setLoadError("");
     setMessage("");
     try {
-      await surveyService.completeSurvey(completingSurvey.id, completeForm);
+      await siteSurveysApi.completeSiteSurvey(completingSurvey.id, {
+        roof_information: completeForm.roofInformation,
+        capacity_estimate: completeForm.capacityEstimate,
+        notes: completeForm.notes,
+      });
       setMessage(`Survey #${completingSurvey.id} completed! Related lead automatically advanced to Quoted.`);
       setCompleteModalOpen(false);
       setCompletingSurvey(null);
@@ -210,7 +208,7 @@ export default function SiteSurveys() {
     setLoadError("");
     setMessage("");
     try {
-      await surveyService.cancelSurvey(survey.id);
+      await siteSurveysApi.cancelSiteSurvey(survey.id);
       setMessage(`Survey #${survey.id} cancelled. Historical record preserved.`);
       notifyCrmChange("site_surveys");
       notifyCrmChange("leads");
@@ -249,13 +247,13 @@ export default function SiteSurveys() {
     setSaving(true);
     setLoadError("");
     try {
-      await surveyService.updateSurvey(editingSurvey.id, {
-        roofInformation: form.roofInformation,
-        capacityEstimate: form.capacityEstimate,
+      await siteSurveysApi.updateSiteSurvey(editingSurvey.id, {
+        roof_information: form.roofInformation,
+        capacity_estimate: form.capacityEstimate,
         notes: form.notes,
-        assignedTo: form.assignedTo,
-        surveyDate: form.surveyDate,
-        timeSlot: form.timeSlot,
+        assigned_to: form.assignedTo,
+        survey_date: form.surveyDate,
+        time_slot: form.timeSlot,
       });
       setMessage("Survey technical details updated.");
       setEditModalOpen(false);

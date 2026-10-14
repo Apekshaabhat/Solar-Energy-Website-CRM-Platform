@@ -27,8 +27,11 @@ import ContactPage from "./components/ContactPage";
 import LoginPage from "./components/LoginPage";
 import SignupPage from "./components/SignupPage";
 import ForgotPasswordPage from "./components/ForgotPasswordPage";
+import ResetPasswordPage from "./components/ResetPasswordPage";
+import ActivatePage from "./components/ActivatePage";
 import { DashboardDataProvider } from "./context/DashboardDataContext";
 import { themes } from "./context/ThemeContext";
+import { AuthProvider, ProtectedRoute } from "./context/AuthContext";
 
 function PublicSite() {
   const [isDark, setIsDark] = useState(false);
@@ -96,6 +99,11 @@ function PublicSite() {
       case "forgot-password":
       case "forgot password":
         return <ForgotPasswordPage theme={theme} navigate={navigate} />;
+      case "reset-password":
+      case "resetpassword":
+        return <ResetPasswordPage theme={theme} />;
+      case "activate":
+        return <ActivatePage theme={theme} />;
       case "home":
       default:
         return <HomePage theme={theme} navigate={navigate} setCurrentPage={navigate} />;
@@ -136,28 +144,116 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <DashboardDataProvider>
-        <Routes>
-          {/* Admin Dashboard Nested Routes */}
-          <Route path="/dashboard" element={<DashboardLayout />}>
-            <Route index element={<Dashboard />} />
-            <Route path="customers" element={<Customers />} />
-            <Route path="leads" element={<Leads />} />
-            <Route path="site-surveys" element={<SiteSurveys />} />
-            <Route path="projects" element={<Projects />} />
-            <Route path="blog" element={<BlogManagement />} />
-            <Route path="calculators" element={<Calculators />} />
-            <Route path="faqs" element={<Faqs />} />
-            <Route path="users" element={<Users />} />
-            <Route path="settings" element={<Settings />} />
-            <Route path="profile" element={<MyProfile />} />
-          </Route>
+      <AuthProvider>
+        <DashboardDataProvider>
+          <Routes>
+            {/* Admin Dashboard Nested Routes */}
+            <Route
+              path="/dashboard"
+              element={
+                <ProtectedRoute>
+                  <DashboardLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route
+                index
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="customers"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Customers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="leads"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Leads />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="site-surveys"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <SiteSurveys />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="projects"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Projects />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                    <BlogManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="calculators"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Calculators />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="faqs"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Faqs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="users"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                    <Users />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="settings"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                    <Settings />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="profile"
+                element={
+                  <ProtectedRoute>
+                    <MyProfile />
+                  </ProtectedRoute>
+                }
+              />
+            </Route>
 
-          {/* Public Site Routes */}
-          <Route path="/login" element={<LoginPage theme={theme} />} />
-          <Route path="/*" element={<PublicSite />} />
-        </Routes>
-      </DashboardDataProvider>
+            {/* Public Site Routes */}
+            <Route path="/login" element={<LoginPage theme={theme} />} />
+            <Route path="/reset-password" element={<ResetPasswordPage theme={theme} />} />
+            <Route path="/activate" element={<ActivatePage theme={theme} />} />
+            <Route path="/*" element={<PublicSite />} />
+          </Routes>
+        </DashboardDataProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

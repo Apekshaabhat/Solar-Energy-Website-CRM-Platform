@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { MapPin, Phone, Mail, Send, CheckCircle2 } from 'lucide-react';
 import Eyebrow from './Eyebrow';
 import CtaBanner from './CtaBanner';
-import { leadService } from '../services/leadService';
+import { leadsApi } from '../api/leads';
 
 export default function ContactPage({ theme }) {
   const [formData, setFormData] = useState({
@@ -28,7 +28,7 @@ export default function ContactPage({ theme }) {
     setIsSubmitting(true);
 
     try {
-      await leadService.createLead({
+      await leadsApi.createLead({
         name: formData.fullName,
         contact: formData.phone || formData.email,
         phone: formData.phone,

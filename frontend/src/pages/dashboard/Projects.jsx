@@ -5,7 +5,7 @@ import PageHeader from "../../components/dashboard/PageHeader";
 import Modal from "../../components/dashboard/Modal";
 import StatusBadge from "../../components/dashboard/StatusBadge";
 import { FormField, SelectInput, TextInput } from "../../components/dashboard/FormField";
-import { projectService } from "../../services/projectService";
+import { projectsApi } from "../../api/projects";
 import { useDashboardData } from "../../context/DashboardDataContext";
 
 const emptyForm = {
@@ -50,8 +50,8 @@ export default function Projects() {
     setLoading(true);
     setError("");
     try {
-      const items = await projectService.getProjects();
-      setProjects(items);
+      const response = await projectsApi.getProjects();
+      setProjects(Array.isArray(response) ? response : response.items || []);
     } catch (err) {
       setError(err.message || "Unable to load projects.");
     } finally {
@@ -69,7 +69,7 @@ export default function Projects() {
     setError("");
     setMessage("");
     try {
-      await projectService.startProject(project.id);
+      await projectsApi.startProject(project.id);
       setMessage(`Project '${project.name}' is now In Progress.`);
       notifyCrmChange("projects");
       await loadProjects();
@@ -86,9 +86,7 @@ export default function Projects() {
     setError("");
     setMessage("");
     try {
-      await projectService.completeProject(project.id, {
-        actualCost: project.estimatedCost,
-      });
+      await projectsApi.completeProject(project.id);
       setMessage(`Project '${project.name}' marked as Completed.`);
       notifyCrmChange("projects");
       notifyCrmChange("customers");
@@ -106,7 +104,7 @@ export default function Projects() {
     setError("");
     setMessage("");
     try {
-      await projectService.holdProject(project.id);
+      await projectsApi.holdProject(project.id);
       setMessage(`Project '${project.name}' is now On Hold.`);
       notifyCrmChange("projects");
       await loadProjects();
@@ -123,7 +121,7 @@ export default function Projects() {
     setError("");
     setMessage("");
     try {
-      await projectService.resumeProject(project.id);
+      await projectsApi.resumeProject(project.id);
       setMessage(`Project '${project.name}' resumed to In Progress.`);
       notifyCrmChange("projects");
       await loadProjects();
@@ -141,7 +139,7 @@ export default function Projects() {
     setError("");
     setMessage("");
     try {
-      await projectService.cancelProject(project.id);
+      await projectsApi.cancelProject(project.id);
       setMessage(`Project '${project.name}' cancelled. CRM history preserved.`);
       notifyCrmChange("projects");
       notifyCrmChange("customers");
@@ -170,7 +168,7 @@ export default function Projects() {
     setSaving(true);
     setError("");
     try {
-      await projectService.updateProject(editingProject.id, {
+      await projectsApi.updateProject(editingProject.id, {
         name: form.name.trim(),
         category: form.category,
         location: form.location.trim(),

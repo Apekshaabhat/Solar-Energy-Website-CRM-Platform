@@ -1,11 +1,13 @@
 import { useState, useRef, useEffect } from "react";
 import { ChevronDown, UserCircle, Settings, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../../context/AuthContext";
 
 function ProfileDropdown() {
   const [open, setOpen] = useState(false);
   const dropdownRef = useRef(null);
   const navigate = useNavigate();
+  const { user, logout } = useAuth();
 
   // Close on outside click
   useEffect(() => {
@@ -18,11 +20,25 @@ function ProfileDropdown() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const handleLogout = async () => {
+    await logout();
+    navigate("/login");
+  };
+
   const menuItems = [
     { label: "My Profile", icon: UserCircle, onClick: () => navigate("/dashboard/profile") },
     { label: "Settings", icon: Settings, onClick: () => navigate("/dashboard/settings") },
-    { label: "Logout", icon: LogOut, onClick: () => navigate("/login"), danger: true },
+    { label: "Logout", icon: LogOut, onClick: handleLogout, danger: true },
   ];
+
+  const initials = user?.name
+    ? user.name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    : "U";
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -32,11 +48,15 @@ function ProfileDropdown() {
         className="flex items-center gap-2 rounded-full px-2 py-1 text-left transition-colors hover:bg-gray-100 dark:hover:bg-white/10 cursor-pointer focus:outline-none"
       >
         <span className="flex h-8 w-8 items-center justify-center rounded-full bg-[#1F5C3E] text-xs font-semibold text-white">
-          AS
+          {initials}
         </span>
         <span className="hidden leading-tight sm:block">
-          <span className="block text-sm font-medium text-gray-900 dark:text-white">Admin</span>
-          <span className="block text-[11px] text-gray-500 dark:text-[#8A968C]">admin@solara.com</span>
+          <span className="block text-sm font-medium text-gray-900 dark:text-white">
+            {user?.name || "User"}
+          </span>
+          <span className="block text-[11px] text-gray-500 dark:text-[#8A968C]">
+            {user?.email || ""}
+          </span>
         </span>
         <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
