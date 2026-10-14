@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import { Leaf, ChevronDown, Search, ArrowRight, Menu, X, Sun, Moon } from 'lucide-react';
+import { useAuth, getDefaultRouteForRole } from '../context/AuthContext';
 
 export default function Header({ theme, isDark, toggleTheme, activePage, currentPage, navigate, setCurrentPage }) {
+  const { user, isAuthenticated, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [calculatorsOpen, setCalculatorsOpen] = useState(false);
 
@@ -220,40 +222,86 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
             )}
           </button>
 
-          {/* Log In Button (Plain text, green when active) */}
-          <button
-            type="button"
-            onClick={() => nav('Login')}
-            className="hidden xl:inline-flex items-center font-medium text-sm transition-colors py-2 px-3 focus:outline-none whitespace-nowrap"
-            style={{
-              color: current.toLowerCase() === 'login' ? theme.green : theme.textMuted,
-            }}
-            onMouseEnter={(e) => {
-              if (current.toLowerCase() !== 'login') {
-                e.currentTarget.style.color = theme.green;
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (current.toLowerCase() !== 'login') {
-                e.currentTarget.style.color = theme.textMuted;
-              }
-            }}
-          >
-            Log In
-          </button>
+          {isAuthenticated && user ? (
+            <div className="hidden xl:flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  window.location.href = getDefaultRouteForRole(user.role);
+                }}
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-full border transition-all focus:outline-none hover:scale-105"
+                style={{
+                  borderColor: theme.border,
+                  backgroundColor: theme.card,
+                }}
+              >
+                <span
+                  className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold text-white"
+                  style={{ backgroundColor: theme.green }}
+                >
+                  {user.name ? user.name.slice(0, 2).toUpperCase() : 'U'}
+                </span>
+                <span className="text-sm font-medium" style={{ color: theme.text }}>
+                  {user.name}
+                </span>
+                <span
+                  className="text-[11px] px-2 py-0.5 rounded-full font-medium"
+                  style={{ backgroundColor: theme.greenSoft, color: theme.green }}
+                >
+                  {user.role}
+                </span>
+              </button>
 
-          {/* Sign Up Button (Filled green pill with right-arrow icon) */}
-          <button
-            type="button"
-            onClick={() => nav('Signup')}
-            className="hidden xl:inline-flex items-center justify-center gap-2 font-medium text-sm px-5 py-2.5 rounded-full transition-colors text-white focus:outline-none whitespace-nowrap"
-            style={{ backgroundColor: theme.green }}
-            onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = theme.greenHover)}
-            onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = theme.green)}
-          >
-            <span>Sign Up</span>
-            <ArrowRight className="w-4 h-4" />
-          </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await logout();
+                  nav('Login');
+                }}
+                className="text-xs font-semibold px-2 py-1.5 rounded-lg transition-colors focus:outline-none hover:underline"
+                style={{ color: theme.textMuted }}
+              >
+                Logout
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Log In Button (Plain text, green when active) */}
+              <button
+                type="button"
+                onClick={() => nav('Login')}
+                className="hidden xl:inline-flex items-center font-medium text-sm transition-colors py-2 px-3 focus:outline-none whitespace-nowrap"
+                style={{
+                  color: current.toLowerCase() === 'login' ? theme.green : theme.textMuted,
+                }}
+                onMouseEnter={(e) => {
+                  if (current.toLowerCase() !== 'login') {
+                    e.currentTarget.style.color = theme.green;
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (current.toLowerCase() !== 'login') {
+                    e.currentTarget.style.color = theme.textMuted;
+                  }
+                }}
+              >
+                Log In
+              </button>
+
+              {/* Sign Up Button (Filled green pill with right-arrow icon) */}
+              <button
+                type="button"
+                onClick={() => nav('Signup')}
+                className="hidden xl:inline-flex items-center justify-center gap-2 font-medium text-sm px-5 py-2.5 rounded-full transition-colors text-white focus:outline-none whitespace-nowrap"
+                style={{ backgroundColor: theme.green }}
+                onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = theme.greenHover)}
+                onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = theme.green)}
+              >
+                <span>Sign Up</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </>
+          )}
 
           {/* Mobile Menu Toggle Button */}
           <button
@@ -351,42 +399,93 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
               );
             })}
 
-            {/* Mobile Log In Entry */}
-            <button
-              type="button"
-              onClick={() => {
-                nav('Login');
-                setMobileMenuOpen(false);
-              }}
-              className={`w-full text-left py-2.5 border-b transition-colors whitespace-nowrap ${
-                current.toLowerCase() === 'login' ? 'font-bold' : 'font-medium'
-              }`}
-              style={{
-                color: current.toLowerCase() === 'login' ? theme.green : theme.textMuted,
-                borderColor: `${theme.border}40`,
-              }}
-            >
-              Log In
-            </button>
+            {isAuthenticated && user ? (
+              <div className="py-2 space-y-2">
+                <div
+                  className="p-3 rounded-xl border flex items-center justify-between"
+                  style={{ borderColor: theme.border, backgroundColor: theme.card }}
+                >
+                  <div className="flex items-center gap-2.5">
+                    <span
+                      className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white"
+                      style={{ backgroundColor: theme.green }}
+                    >
+                      {user.name ? user.name.slice(0, 2).toUpperCase() : "U"}
+                    </span>
+                    <div>
+                      <p className="text-sm font-semibold" style={{ color: theme.text }}>
+                        {user.name}
+                      </p>
+                      <p className="text-xs" style={{ color: theme.textMuted }}>
+                        {user.role}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.location.href = getDefaultRouteForRole(user.role);
+                      setMobileMenuOpen(false);
+                    }}
+                    className="px-3 py-1 rounded-full text-xs font-medium text-white"
+                    style={{ backgroundColor: theme.green }}
+                  >
+                    Dashboard
+                  </button>
+                </div>
 
-            {/* Mobile Sign Up Entry */}
-            <button
-              type="button"
-              onClick={() => {
-                nav('Signup');
-                setMobileMenuOpen(false);
-              }}
-              className={`w-full text-left py-2.5 border-b transition-colors flex items-center justify-between whitespace-nowrap ${
-                current.toLowerCase() === 'signup' ? 'font-bold' : 'font-medium'
-              }`}
-              style={{
-                color: current.toLowerCase() === 'signup' ? theme.green : theme.textMuted,
-                borderColor: `${theme.border}40`,
-              }}
-            >
-              <span>Sign Up</span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    await logout();
+                    setMobileMenuOpen(false);
+                    nav("Login");
+                  }}
+                  className="w-full text-left py-2.5 border-b text-sm font-medium transition-colors text-red-600 border-red-100"
+                >
+                  Logout
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Mobile Log In Entry */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    nav("Login");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left py-2.5 border-b transition-colors whitespace-nowrap ${
+                    current.toLowerCase() === "login" ? "font-bold" : "font-medium"
+                  }`}
+                  style={{
+                    color: current.toLowerCase() === "login" ? theme.green : theme.textMuted,
+                    borderColor: `${theme.border}40`,
+                  }}
+                >
+                  Log In
+                </button>
+
+                {/* Mobile Sign Up Entry */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    nav("Signup");
+                    setMobileMenuOpen(false);
+                  }}
+                  className={`w-full text-left py-2.5 border-b transition-colors flex items-center justify-between whitespace-nowrap ${
+                    current.toLowerCase() === "signup" ? "font-bold" : "font-medium"
+                  }`}
+                  style={{
+                    color: current.toLowerCase() === "signup" ? theme.green : theme.textMuted,
+                    borderColor: `${theme.border}40`,
+                  }}
+                >
+                  <span>Sign Up</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+              </>
+            )}
           </nav>
 
           <div className="pt-2 flex items-center justify-center">

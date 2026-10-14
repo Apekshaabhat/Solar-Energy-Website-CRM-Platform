@@ -1,14 +1,19 @@
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, hash_token
 from app.dependencies.auth import get_current_user, require_roles
 from app.models.user import User
+from app.models.token import PasswordResetToken
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.common import APIResponse
+from app.services.email_service import EmailService
 
 router = APIRouter(prefix="/users", tags=["Users Management"])
 
@@ -62,22 +67,41 @@ def create_user(
             detail="A user with this email address already exists"
         )
     
-    # Default temporary password if not provided
-    pwd = request.password if request.password else "Solara@2026!"
+    # Generate secure random initial password hash if none provided
+    initial_pwd = request.password if request.password else secrets.token_urlsafe(32)
     user = User(
         name=request.name.strip(),
         email=request.email.lower().strip(),
-        password_hash=get_password_hash(pwd),
+        password_hash=get_password_hash(initial_pwd),
         phone=request.phone.strip() if request.phone else None,
         role=request.role,
-        status=request.status or "Invited"
+        status="Invited" if not request.status or request.status == "Active" else request.status,
+        failed_attempts=0,
+        token_version=0,
     )
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Generate single-use expiring activation token using the reset mechanism
+    raw_token = secrets.token_urlsafe(32)
+    token_sha256 = hash_token(raw_token)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS)
+    activation_record = PasswordResetToken(
+        user_id=user.id,
+        token_hash=token_sha256,
+        token_type="activate",
+        expires_at=expires_at,
+    )
+    db.add(activation_record)
+    db.commit()
+
+    # Emit invitation email / dev console log
+    EmailService.send_account_invitation_email(user.email, raw_token)
+
     return APIResponse(
         success=True,
-        message="User created successfully",
+        message="User created successfully. Account activation invitation has been generated.",
         data=UserResponse.model_validate(user)
     )
 

@@ -1,44 +1,52 @@
+from sqlalchemy.orm import Session
+from app.core.database import engine
+from app.models.user import User
 from .conftest import auth_headers
 
 
 def test_register_login_and_me(client):
+    # Registration with strong password meets policy
     response = client.post(
         "/api/v1/auth/register",
         json={
             "name": "Asha Rao",
             "email": "asha@example.com",
-            "password": "password123",
+            "password": "StrongPassword123",
             "phone": "+91 90000 00000",
         },
     )
     assert response.status_code == 201
-    assert response.json()["data"]["email"] == "asha@example.com"
+    assert response.json()["success"] is True
 
+    # Duplicate registration returns identical generic response without revealing account existence
     duplicate = client.post(
         "/api/v1/auth/register",
         json={
             "name": "Asha Rao",
             "email": "asha@example.com",
-            "password": "password123",
+            "password": "StrongPassword123",
         },
     )
-    assert duplicate.status_code == 400
+    assert duplicate.status_code == 201
+    assert duplicate.json()["success"] is True
 
-    escalated = client.post(
-        "/api/v1/auth/register",
-        json={
-            "name": "Mallory Singh",
-            "email": "mallory@example.com",
-            "password": "password123",
-            "role": "Admin",
-        },
+    # Pending user cannot log in
+    pending_login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "asha@example.com", "password": "StrongPassword123"},
     )
-    assert escalated.status_code == 201
-    assert escalated.json()["data"]["role"] == "Customer"
+    assert pending_login.status_code == 401
+    assert pending_login.json()["message"] == "Incorrect email or password"
+
+    # Once user is set to Active, login succeeds
+    with Session(engine) as db:
+        user = db.query(User).filter(User.email == "asha@example.com").first()
+        user.status = "Active"
+        db.commit()
 
     login = client.post(
         "/api/v1/auth/login",
-        json={"email": "asha@example.com", "password": "password123"},
+        json={"email": "asha@example.com", "password": "StrongPassword123"},
     )
     assert login.status_code == 200
     token = login.json()["access_token"]
@@ -46,6 +54,7 @@ def test_register_login_and_me(client):
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert me.status_code == 200
     assert me.json()["data"]["name"] == "Asha Rao"
+
 
 
 def test_public_lead_submission_and_staff_lead_management(client):
@@ -80,22 +89,7 @@ def test_public_lead_submission_and_staff_lead_management(client):
 
 
 def test_customer_token_cannot_assign_public_lead_ownership(client):
-    register = client.post(
-        "/api/v1/auth/register",
-        json={
-            "name": "Customer User",
-            "email": "customer@example.com",
-            "password": "password123",
-        },
-    )
-    assert register.status_code == 201
-    assert register.json()["data"]["role"] == "Customer"
-
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"email": "customer@example.com", "password": "password123"},
-    )
-    token = login.json()["access_token"]
+    headers = auth_headers(client, role="Customer", email="customer@example.com")
 
     created = client.post(
         "/api/v1/leads",
@@ -107,7 +101,7 @@ def test_customer_token_cannot_assign_public_lead_ownership(client):
             "assigned_user_id": 999,
             "customer_id": 999,
         },
-        headers={"Authorization": f"Bearer {token}"},
+        headers=headers,
     )
     assert created.status_code == 201
     assert created.json()["data"]["assigned_user_id"] is None

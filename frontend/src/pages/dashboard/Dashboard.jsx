@@ -9,10 +9,14 @@ import QuickActions from "../../components/dashboard/QuickActions";
 import RecentActivity from "../../components/dashboard/RecentActivity";
 import PromoBanner from "../../components/dashboard/PromoBanner";
 import { statCards as defaultStatCards } from "../../data/dashboardData";
-import { dashboardService } from "../../services/dashboardService";
+import { dashboardApi } from "../../api/dashboard";
 import { useDashboardData } from "../../context/DashboardDataContext";
 
 const cardRouteMap = {
+  "total-leads": "/dashboard/leads",
+  "site-surveys": "/dashboard/site-surveys",
+  "ongoing-projects": "/dashboard/projects",
+  "completed-projects": "/dashboard/projects",
   1: "/dashboard/leads",
   2: "/dashboard/site-surveys",
   3: "/dashboard/projects",
@@ -32,8 +36,8 @@ export default function Dashboard() {
     setError("");
     try {
       const [sumData, actData] = await Promise.all([
-        dashboardService.getSummary(),
-        dashboardService.getActivities(10),
+        dashboardApi.getSummary(),
+        dashboardApi.getActivities(10),
       ]);
       setSummary(sumData);
       setActivities(Array.isArray(actData) ? actData : []);

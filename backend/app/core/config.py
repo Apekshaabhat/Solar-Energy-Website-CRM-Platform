@@ -16,10 +16,27 @@ class Settings(BaseSettings):
     # Production default is PostgreSQL as specified in instructions
     DATABASE_URL: str = "postgresql+psycopg2://postgres:postgres@localhost:5432/solar_crm"
     
-    # JWT Security
+    # JWT Security & Session Lifetimes
     SECRET_KEY: str = "solara-crm-production-secret-key-change-in-env-at-least-32-chars-long"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # Legacy default
+    ACCESS_TOKEN_EXPIRE_HOURS: int = 8  # Default session lifetime (remember_me=False)
+    ACCESS_TOKEN_EXPIRE_REMEMBER_ME_DAYS: int = 30  # Extended session lifetime (remember_me=True)
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
+    ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS: int = 24
+
+    # Rate Limiting
+    AUTH_RATE_LIMIT: str = "5/minute"
+
+    # Email & Notification Settings
+    EMAIL_BACKEND: str = "console"  # "console" for dev or "smtp" for production
+    SMTP_HOST: Union[str, None] = None
+    SMTP_PORT: int = 587
+    SMTP_USER: Union[str, None] = None
+    SMTP_PASSWORD: Union[str, None] = None
+    SMTP_TLS: bool = True
+    EMAILS_FROM_EMAIL: str = "noreply@solara.com"
+    FRONTEND_URL: str = "http://localhost:5173"
     
     # CORS
     CORS_ORIGINS: Union[List[str], str] = [

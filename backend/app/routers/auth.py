@@ -1,14 +1,19 @@
-from fastapi import APIRouter, Depends, status
+from typing import Optional
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
-from app.dependencies.auth import get_current_user
+from app.core.limiter import limiter
+from app.dependencies.auth import get_current_user, oauth2_scheme
 from app.models.user import User
 from app.schemas.auth import (
     Token,
     LoginRequest,
     RegisterRequest,
     ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ActivateRequest,
     ChangePasswordRequest,
     ProfileUpdateRequest,
 )
@@ -21,17 +26,22 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 @router.post(
     "/register",
-    response_model=APIResponse[UserResponse],
+    response_model=APIResponse[Optional[UserResponse]],
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
-    description="Registers a new user and returns user details. Passwords must be at least 6 characters.",
+    description="Registers a new customer account in Pending status. Does not reveal whether email exists.",
 )
-def register(request: RegisterRequest, db: Session = Depends(get_db)):
-    user = AuthService.register_user(db, request)
+@limiter.limit(settings.AUTH_RATE_LIMIT)
+def register(
+    request: Request,
+    body: RegisterRequest,
+    db: Session = Depends(get_db),
+):
+    AuthService.register_user(db, body)
     return APIResponse(
         success=True,
-        message="User registered successfully",
-        data=UserResponse.model_validate(user)
+        message="Registration request submitted. Your account is pending administrator approval.",
+        data=None,
     )
 
 
@@ -39,23 +49,28 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
     "/login",
     response_model=Token,
     summary="User login",
-    description="Authenticates user credentials and returns a signed JWT access token.",
+    description="Authenticates user credentials, enforces lockout policy, and returns a signed JWT access token.",
 )
-def login(request: LoginRequest, db: Session = Depends(get_db)):
-    return AuthService.authenticate_user(db, request)
+@limiter.limit(settings.AUTH_RATE_LIMIT)
+def login(
+    request: Request,
+    body: LoginRequest,
+    db: Session = Depends(get_db),
+):
+    return AuthService.authenticate_user(db, body)
 
 
 @router.get(
     "/me",
     response_model=APIResponse[UserResponse],
     summary="Get current user profile",
-    description="Returns profile information for the authenticated user.",
+    description="Authoritative current-user endpoint that retrieves validated user profile from database.",
 )
 def get_me(current_user: User = Depends(get_current_user)):
     return APIResponse(
         success=True,
         message="Current user profile fetched",
-        data=UserResponse.model_validate(current_user)
+        data=UserResponse.model_validate(current_user),
     )
 
 
@@ -74,7 +89,7 @@ def update_profile(
     return APIResponse(
         success=True,
         message="Profile updated successfully",
-        data=UserResponse.model_validate(updated)
+        data=UserResponse.model_validate(updated),
     )
 
 
@@ -82,7 +97,7 @@ def update_profile(
     "/change-password",
     response_model=APIResponse[bool],
     summary="Change user password",
-    description="Changes password after validating the current password.",
+    description="Changes password after validating the current password, and invalidates other active sessions.",
 )
 def change_password(
     request: ChangePasswordRequest,
@@ -93,7 +108,7 @@ def change_password(
     return APIResponse(
         success=True,
         message="Password updated successfully",
-        data=True
+        data=True,
     )
 
 
@@ -101,14 +116,55 @@ def change_password(
     "/forgot-password",
     response_model=APIResponse[bool],
     summary="Forgot password request",
-    description="Sends password reset instructions if account exists.",
+    description="Sends password reset instructions if account exists and is active without revealing status.",
 )
-def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    # Safely acknowledge without leaking account existence
+@limiter.limit(settings.AUTH_RATE_LIMIT)
+def forgot_password(
+    request: Request,
+    body: ForgotPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    AuthService.request_password_reset(db, body.email)
     return APIResponse(
         success=True,
         message="If an account with this email exists, password reset instructions have been sent.",
-        data=True
+        data=True,
+    )
+
+
+@router.post(
+    "/reset-password",
+    response_model=APIResponse[bool],
+    summary="Reset password with token",
+    description="Verifies single-use reset token and updates password while invalidating old sessions.",
+)
+def reset_password(
+    body: ResetPasswordRequest,
+    db: Session = Depends(get_db),
+):
+    AuthService.reset_password(db, body.token, body.new_password)
+    return APIResponse(
+        success=True,
+        message="Password reset successfully. You can now log in.",
+        data=True,
+    )
+
+
+@router.post(
+    "/activate",
+    response_model=APIResponse[bool],
+    summary="Activate invited user account",
+    description="Verifies activation token, sets initial password, and activates account.",
+)
+def activate(
+    body: ActivateRequest,
+    db: Session = Depends(get_db),
+):
+    AuthService.activate_account(db, body.token, body.password)
+    return APIResponse(
+        success=True,
+        message="Account activated successfully. You can now log in.",
+        data=True,
     )
 
 
@@ -116,11 +172,17 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
     "/logout",
     response_model=APIResponse[bool],
     summary="User logout",
-    description="Handles client logout acknowledgement.",
+    description="Revokes current token's jti claim.",
 )
-def logout(current_user: User = Depends(get_current_user)):
+def logout(
+    token: Optional[str] = Depends(oauth2_scheme),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if token:
+        AuthService.revoke_token(db, token)
     return APIResponse(
         success=True,
         message="Logged out successfully",
-        data=True
+        data=True,
     )
