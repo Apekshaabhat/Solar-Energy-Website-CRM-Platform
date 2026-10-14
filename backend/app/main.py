@@ -15,6 +15,11 @@ from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.limiter import limiter
 from app.models.token import RevokedToken, PasswordResetToken
+from sqlalchemy import text
+
+from app.core.config import settings
+from app.core.database import SessionLocal, engine
+from app.models.user import User
 import app.models  # ensure models are registered
 from app.routers import (
     auth_router,
@@ -40,8 +45,12 @@ logger = logging.getLogger("solara_api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: ensure tables exist
-    logger.info("Initializing SOLARA API database tables...")
+    logger.info("Checking SOLARA API database connection...")
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+    logger.info("Database connection established.")
+
+    db = SessionLocal()
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully.")
@@ -58,6 +67,12 @@ async def lifespan(app: FastAPI):
             logger.info("Cleaned up expired rows in revoked_tokens and password_reset_tokens.")
     except Exception as e:
         logger.warning(f"Error cleaning up expired tokens at startup: {e}")
+        if db.query(User).count() == 0:
+            logger.info("No users found. Running default seed data for local development.")
+            from seed import seed_data
+            seed_data()
+    finally:
+        db.close()
 
     yield
     # Shutdown
@@ -211,6 +226,8 @@ def root():
 
 @app.get("/health", tags=["System"])
 def health_check():
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
     return {"status": "healthy", "version": settings.VERSION}
 
 

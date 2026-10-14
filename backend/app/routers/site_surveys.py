@@ -81,6 +81,12 @@ def apply_survey_update(survey: SiteSurvey, update_data: dict) -> None:
         setattr(survey, field, val)
 
 
+def escape_spreadsheet_formula(value: str) -> str:
+    if value.lstrip(" \t\r\n").startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
+
+
 @router.get(
     "",
     response_model=SiteSurveyListResponse,
@@ -178,13 +184,13 @@ def export_surveys(
     writer.writerow(["Customer", "Location", "Property Type", "Survey Date", "Time Slot", "Assigned To", "Status"])
     for survey in query.order_by(desc(SiteSurvey.created_at)).all():
         writer.writerow([
-            survey.customer_name,
-            survey.location,
-            survey.property_type,
-            survey.survey_date,
-            survey.time_slot,
-            survey.assigned_to,
-            survey.status,
+            escape_spreadsheet_formula(survey.customer_name),
+            escape_spreadsheet_formula(survey.location),
+            escape_spreadsheet_formula(survey.property_type),
+            escape_spreadsheet_formula(survey.survey_date),
+            escape_spreadsheet_formula(survey.time_slot),
+            escape_spreadsheet_formula(survey.assigned_to),
+            escape_spreadsheet_formula(survey.status),
         ])
 
     output.seek(0)

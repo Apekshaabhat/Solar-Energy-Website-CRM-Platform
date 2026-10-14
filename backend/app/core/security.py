@@ -19,7 +19,7 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         password_bytes = plain_password.encode("utf-8")
         hashed_bytes = hashed_password.encode("utf-8")
         return bcrypt.checkpw(password_bytes, hashed_bytes)
-    except Exception:
+    except (TypeError, ValueError, UnicodeError):
         return False
 
 
@@ -75,6 +75,9 @@ def create_access_token(
     }
 
     if extra_claims:
+        reserved_claims = {"sub", "iat", "exp"} & extra_claims.keys()
+        if reserved_claims:
+            raise ValueError(f"extra_claims cannot override reserved claims: {', '.join(sorted(reserved_claims))}")
         to_encode.update(extra_claims)
 
     encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
@@ -85,3 +88,9 @@ def decode_access_token(token: str) -> dict:
     """Decode and validate a JWT access token."""
     return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
 
+    return jwt.decode(
+        token,
+        settings.SECRET_KEY,
+        algorithms=[settings.ALGORITHM],
+        options={"require": ["sub", "iat", "exp"]},
+    )

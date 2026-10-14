@@ -2,7 +2,7 @@ import math
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
 
 from app.core.database import get_db
@@ -24,7 +24,19 @@ from app.services.dashboard_service import format_relative_time
 
 router = APIRouter(prefix="/customers", tags=["Customers Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
+CUSTOMER_MANAGER_ROLES = {"admin", "manager"}
 NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}
+
+
+def is_customer_manager(user: User) -> bool:
+    return user.role.lower() in CUSTOMER_MANAGER_ROLES
+
+
+def accessible_customers_query(db: Session, current_user: User) -> SQLAlchemyQuery[Customer]:
+    query = db.query(Customer)
+    if not is_customer_manager(current_user):
+        query = query.filter(Customer.assigned_user_id == current_user.id)
+    return query
 
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
@@ -60,7 +72,7 @@ def list_customers(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Customer)
+    query = accessible_customers_query(db, current_user)
 
     if search:
         s = f"%{search.strip()}%"
@@ -117,7 +129,16 @@ def create_customer(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    validate_user_reference(db, request.assigned_user_id)
+    if is_customer_manager(current_user):
+        assigned_user_id = request.assigned_user_id
+        validate_user_reference(db, assigned_user_id)
+    else:
+        if request.assigned_user_id not in (None, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can assign customers to other users",
+            )
+        assigned_user_id = current_user.id
 
     customer = Customer(
         name=request.name.strip(),
@@ -127,8 +148,8 @@ def create_customer(
         location=request.location.strip(),
         property_type=request.property_type,
         status=request.status or "Active",
-        customer_since=request.customer_since or datetime.utcnow().strftime("%d %b %Y"),
-        assigned_user_id=request.assigned_user_id,
+        customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),
+        assigned_user_id=assigned_user_id,
     )
     db.add(customer)
     db.flush()
@@ -253,7 +274,7 @@ def get_customer(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     resp = CustomerResponse.model_validate(customer)
@@ -272,12 +293,21 @@ def update_customer(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
 
     old_status = customer.status
     update_data = request.model_dump(exclude_unset=True)
+    if (
+        "assigned_user_id" in update_data
+        and not is_customer_manager(current_user)
+        and update_data["assigned_user_id"] != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and managers can change customer assignments",
+        )
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_customer_update(customer, update_data)
 

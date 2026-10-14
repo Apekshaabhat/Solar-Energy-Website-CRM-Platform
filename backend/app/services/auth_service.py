@@ -57,6 +57,7 @@ class AuthService:
             token_version=0,
             failed_attempts=0,
             locked_until=None,
+            status="Active"
         )
         db.add(user)
         db.commit()

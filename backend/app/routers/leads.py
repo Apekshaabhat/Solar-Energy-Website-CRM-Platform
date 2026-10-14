@@ -1,7 +1,7 @@
 import math
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
 
 from app.core.database import get_db
@@ -29,7 +29,12 @@ router = APIRouter(prefix="/leads", tags=["Leads Management"])
 LEAD_STATUSES = ["New", "Contacted", "Site Survey", "Quoted", "Converted", "Cancelled", "Lost"]
 
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
+LEAD_MANAGER_ROLES = {"admin", "manager"}
 NULLABLE_LEAD_FIELDS = {"email", "phone", "notes", "estimated_value", "assigned_user_id", "customer_id"}
+
+
+def is_lead_manager(user: User) -> bool:
+    return user.role.lower() in LEAD_MANAGER_ROLES
 
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
@@ -58,6 +63,11 @@ def apply_lead_update(lead: Lead, update_data: dict) -> None:
         setattr(lead, field, val)
 
 
+def accessible_leads_query(db: Session, current_user: User) -> SQLAlchemyQuery[Lead]:
+    query = db.query(Lead)
+    if not is_lead_manager(current_user):
+        query = query.filter(Lead.assigned_user_id == current_user.id)
+    return query
 def build_lead_response(lead: Lead, db: Session) -> LeadResponse:
     resp = LeadResponse.model_validate(lead)
     resp.date = lead.created_at.strftime("%d %b %Y") if lead.created_at else "Recently"
@@ -84,7 +94,7 @@ def list_leads(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Lead)
+    query = accessible_leads_query(db, current_user)
 
     if search:
         s = f"%{search.strip()}%"
@@ -150,8 +160,18 @@ def create_lead(
     db: Session = Depends(get_db),
 ):
     is_staff = is_staff_user(current_user)
+    assigned_user_id = None
     if is_staff:
-        validate_user_reference(db, request.assigned_user_id)
+        if is_lead_manager(current_user):
+            assigned_user_id = request.assigned_user_id
+            validate_user_reference(db, assigned_user_id)
+        else:
+            if request.assigned_user_id not in (None, current_user.id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only administrators and managers can assign leads to other users",
+                )
+            assigned_user_id = current_user.id
         validate_customer_reference(db, request.customer_id)
 
     lead = Lead(
@@ -165,7 +185,7 @@ def create_lead(
         status=request.status or "New",
         notes=request.notes,
         estimated_value=request.estimated_value,
-        assigned_user_id=request.assigned_user_id if is_staff else None,
+        assigned_user_id=assigned_user_id,
         customer_id=request.customer_id if is_staff else None,
     )
     db.add(lead)
@@ -204,7 +224,7 @@ def get_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     return APIResponse(success=True, data=build_lead_response(lead, db))
@@ -221,7 +241,7 @@ def update_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
 

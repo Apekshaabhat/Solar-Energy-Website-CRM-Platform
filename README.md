@@ -126,6 +126,15 @@ Start the FastAPI application:
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
+The API is available at `http://localhost:8001`.
+Interactive API documentation is available at `http://localhost:8001/docs`.
+The frontend expects the backend at `http://localhost:8001/api/v1` by default. If you run the API on a different port, set `VITE_API_BASE_URL` in `frontend/.env.local` to match that URL.
+
+If port `8000` is available in your environment, it can still be used by setting `VITE_API_BASE_URL` to the matching API URL. The repository default is `8001` because port `8000` may already be in use by another local process.
+
+### 2. Start the frontend
+
+Keep the backend terminal running. Open a second PowerShell window in the repository root:
 - API Base URL: `http://localhost:8000/api/v1`
 - Interactive Swagger UI: `http://localhost:8000/docs`
 - Redoc Documentation: `http://localhost:8000/redoc`
@@ -138,6 +147,8 @@ npm ci
 npm run dev
 ```
 
+The frontend is available at `http://localhost:5173`.
+Set `VITE_API_BASE_URL` in `frontend/.env.local` when the API uses a different base URL.
 The frontend will be available at `http://localhost:5173`.
 
 ---
@@ -200,6 +211,10 @@ npm run lint
 npm run build
 ```
 
+## Admin Login
+
+The seeded admin account in this project is:
+
 ---
 
 ## Repository Structure
@@ -233,6 +248,9 @@ Solar-Energy-Website-CRM-Platform/
 
 ---
 
+Change these seeded credentials before using the application outside local development.
+
+## Environment Variables
 ## License
 
 This project is licensed under the MIT License.

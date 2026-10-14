@@ -96,6 +96,9 @@ def get_optional_current_user(
 
         return user
     except Exception:
+        if user and user.status == "Active":
+            return user
+    except (PyJWTError, TypeError, ValueError):
         return None
 
 

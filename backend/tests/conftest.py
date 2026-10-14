@@ -17,8 +17,10 @@ from app.core.database import Base, engine  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
 from app.core.limiter import limiter  # noqa: E402
 from app.models.user import User  # noqa: E402
+from app.core.database import Base, SessionLocal, engine  # noqa: E402
 import app.models  # noqa: E402,F401
 from app.main import app  # noqa: E402
+from app.models.user import User  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +62,13 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
             user.failed_attempts = 0
             user.locked_until = None
             db.commit()
+
+    db = SessionLocal()
+    try:
+        db.query(User).filter(User.email == email).update({"role": "Admin"})
+        db.commit()
+    finally:
+        db.close()
 
     login_response = client.post(
         "/api/v1/auth/login",
