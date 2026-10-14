@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -104,11 +104,9 @@ def change_password(
     description="Sends password reset instructions if account exists.",
 )
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    # Safely acknowledge without leaking account existence
-    return APIResponse(
-        success=True,
-        message="If an account with this email exists, password reset instructions have been sent.",
-        data=True
+    raise HTTPException(
+        status_code=status.HTTP_501_NOT_IMPLEMENTED,
+        detail="Password reset is not configured for this service",
     )
 
 

@@ -18,16 +18,12 @@ class AuthService:
                 detail="A user with this email address already exists"
             )
 
-        has_existing_users = db.query(User.id).first() is not None
-        requested_role = (request.role or "Customer").strip()
-        role = "Admin" if requested_role == "Admin" and not has_existing_users else "Customer"
-        
         user = User(
             name=request.name.strip(),
             email=request.email.lower().strip(),
             password_hash=get_password_hash(request.password),
             phone=request.phone.strip() if request.phone else None,
-            role=role,
+            role="Customer",
             status="Active"
         )
         db.add(user)

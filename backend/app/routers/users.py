@@ -62,12 +62,10 @@ def create_user(
             detail="A user with this email address already exists"
         )
     
-    # Default temporary password if not provided
-    pwd = request.password if request.password else "Solara@2026!"
     user = User(
         name=request.name.strip(),
         email=request.email.lower().strip(),
-        password_hash=get_password_hash(pwd),
+        password_hash=get_password_hash(request.password),
         phone=request.phone.strip() if request.phone else None,
         role=request.role,
         status=request.status or "Invited"

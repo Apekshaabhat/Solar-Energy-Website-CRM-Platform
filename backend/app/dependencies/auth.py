@@ -37,7 +37,7 @@ def get_current_user(
         if user_id_str is None:
             raise credentials_exception
         user_id = int(user_id_str)
-    except (PyJWTError, ValueError):
+    except (PyJWTError, TypeError, ValueError):
         raise credentials_exception
 
     user = db.query(User).filter(User.id == user_id).first()
@@ -67,7 +67,7 @@ def get_optional_current_user(
         user = db.query(User).filter(User.id == user_id).first()
         if user and user.status == "Active":
             return user
-    except Exception:
+    except (PyJWTError, TypeError, ValueError):
         return None
     return None
 
