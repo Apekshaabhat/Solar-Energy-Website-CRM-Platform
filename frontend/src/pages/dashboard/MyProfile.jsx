@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Camera,
   Shield,
@@ -9,15 +9,31 @@ import {
   Lock,
   CheckCircle2,
 } from "lucide-react";
+import { useAuth } from "../../context/AuthContext";
+import authApi from "../../api/auth";
 
 export default function MyProfile() {
+  const { user, updateUser } = useAuth();
+
   // Personal Info Form State
   const [personalInfo, setPersonalInfo] = useState({
-    fullName: "Alex Sterling",
-    email: "admin@solara.com",
-    phone: "+1 (555) 234-5678",
+    fullName: user?.name || "",
+    email: user?.email || "",
+    phone: user?.phone || "",
   });
   const [infoSavedNotice, setInfoSavedNotice] = useState(false);
+  const [infoError, setInfoError] = useState("");
+  const [isSavingInfo, setIsSavingInfo] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setPersonalInfo({
+        fullName: user.name || "",
+        email: user.email || "",
+        phone: user.phone || "",
+      });
+    }
+  }, [user]);
 
   // Password Form State
   const [passwordData, setPasswordData] = useState({
@@ -27,14 +43,37 @@ export default function MyProfile() {
   });
   const [passwordNotice, setPasswordNotice] = useState(false);
   const [passwordError, setPasswordError] = useState("");
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-  const handleInfoSubmit = (e) => {
+  const handleInfoSubmit = async (e) => {
     e.preventDefault();
-    setInfoSavedNotice(true);
-    setTimeout(() => setInfoSavedNotice(false), 3000);
+    setInfoError("");
+    setIsSavingInfo(true);
+    try {
+      const updated = await authApi.updateProfile({
+        name: personalInfo.fullName,
+        email: personalInfo.email,
+        phone: personalInfo.phone,
+      });
+      updateUser(updated);
+      setInfoSavedNotice(true);
+      setTimeout(() => setInfoSavedNotice(false), 3000);
+    } catch (err) {
+      setInfoError(err.message || "Failed to update profile details.");
+    } finally {
+      setIsSavingInfo(false);
+    }
   };
 
-  const handlePasswordSubmit = (e) => {
+  const passwordCriteria = [
+    { label: 'At least 10 characters', met: passwordData.newPassword.length >= 10 },
+    { label: 'At least one uppercase letter', met: /[A-Z]/.test(passwordData.newPassword) },
+    { label: 'At least one lowercase letter', met: /[a-z]/.test(passwordData.newPassword) },
+    { label: 'At least one digit (0-9)', met: /\d/.test(passwordData.newPassword) },
+  ];
+  const isNewPasswordValid = passwordCriteria.every((c) => c.met);
+
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     setPasswordError("");
     if (!passwordData.currentPassword) {
@@ -45,15 +84,42 @@ export default function MyProfile() {
       setPasswordError("New passwords do not match.");
       return;
     }
-    if (passwordData.newPassword.length < 6) {
-      setPasswordError("New password must be at least 6 characters.");
+    if (!isNewPasswordValid) {
+      setPasswordError("New password must be at least 10 characters and contain uppercase, lowercase, and a digit.");
       return;
     }
 
-    setPasswordNotice(true);
-    setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
-    setTimeout(() => setPasswordNotice(false), 3000);
+    setIsUpdatingPassword(true);
+    try {
+      await authApi.changePassword(
+        passwordData.currentPassword,
+        passwordData.newPassword,
+        passwordData.confirmPassword
+      );
+      setPasswordNotice(true);
+      setPasswordData({ currentPassword: "", newPassword: "", confirmPassword: "" });
+      setTimeout(() => setPasswordNotice(false), 3000);
+    } catch (err) {
+      if (err.status === 429) {
+        setPasswordError("Too many attempts, please try again later.");
+      } else if (err.status === 422 || err.status === 400 || err.status === 401) {
+        setPasswordError(err.message || "Invalid current password or new password does not meet policy.");
+      } else {
+        setPasswordError("Something went wrong, please try again.");
+      }
+    } finally {
+      setIsUpdatingPassword(false);
+    }
   };
+
+  const initials = personalInfo.fullName
+    ? personalInfo.fullName
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    : "U";
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -74,7 +140,7 @@ export default function MyProfile() {
           {/* Large Avatar with Camera Icon Overlay */}
           <div className="relative mb-4">
             <div className="w-24 h-24 rounded-full bg-[#1F5C3E] text-white text-2xl font-bold flex items-center justify-center shadow-md border-2 border-white dark:border-[#293227]">
-              AS
+              {initials}
             </div>
             <button
               type="button"
@@ -96,7 +162,7 @@ export default function MyProfile() {
           {/* Role Pill Badge */}
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/50">
             <Shield className="w-3.5 h-3.5" />
-            Admin
+            {user?.role || "User"}
           </span>
         </div>
 
@@ -271,13 +337,43 @@ export default function MyProfile() {
                 </div>
               </div>
 
+              {passwordData.newPassword && (
+                <div className="rounded-xl p-3 bg-gray-50/70 dark:bg-white/5 border border-gray-100 dark:border-white/10 space-y-1.5">
+                  <p className="text-xs font-semibold text-gray-500 dark:text-gray-400">
+                    Password requirements:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs">
+                    {passwordCriteria.map((criterion, idx) => (
+                      <div
+                        key={idx}
+                        className={`flex items-center gap-1.5 ${
+                          criterion.met ? "text-[#1F5C3E] dark:text-[#4ADE80]" : "text-gray-400"
+                        }`}
+                      >
+                        <span
+                          className={`w-3.5 h-3.5 rounded-full flex items-center justify-center text-[10px] font-bold ${
+                            criterion.met
+                              ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
+                              : "bg-gray-200 text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+                          }`}
+                        >
+                          {criterion.met ? "✓" : "•"}
+                        </span>
+                        <span>{criterion.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Secondary Outlined Action Button */}
               <div className="flex items-center gap-3 pt-2">
                 <button
                   type="submit"
-                  className="border border-[#1F5C3E] text-[#1F5C3E] dark:border-[#4ADE80] dark:text-[#4ADE80] hover:bg-[#1F5C3E]/10 text-sm font-medium rounded-xl px-4 py-2.5 transition-colors cursor-pointer"
+                  disabled={isUpdatingPassword || !isNewPasswordValid}
+                  className="border border-[#1F5C3E] text-[#1F5C3E] dark:border-[#4ADE80] dark:text-[#4ADE80] hover:bg-[#1F5C3E]/10 text-sm font-medium rounded-xl px-4 py-2.5 transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                 >
-                  Update Password
+                  {isUpdatingPassword ? "Updating..." : "Update Password"}
                 </button>
                 {passwordNotice && (
                   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">

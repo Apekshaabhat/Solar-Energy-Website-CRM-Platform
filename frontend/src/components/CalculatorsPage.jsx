@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ArrowRight, ShieldCheck, Zap, TrendingUp, Clock, Leaf, CheckCircle2 } from 'lucide-react';
 import Eyebrow from './Eyebrow';
-import { calculatorService } from '../services/calculatorService';
+import { calculatorsApi } from '../api/calculators';
 
 export default function CalculatorsPage({ theme }) {
   const [name, setName] = useState('');
@@ -23,25 +23,30 @@ export default function CalculatorsPage({ theme }) {
     setIsSubmitting(true);
 
     try {
-      const estimate = await calculatorService.calculateSavings({
-        monthlyBill: bill,
-        roofArea,
+      const estimate = await calculatorsApi.estimateSavings({
+        monthly_bill: Number(bill) || 0,
+        roof_area: Number(roofArea) || 0,
+        property_type: propertyType,
       });
+
       const normalized = {
-        systemSizeKW: estimate.system_size_kw,
-        annualSavings: estimate.annual_savings,
-        paybackYears: estimate.payback_years,
-        co2Tons: estimate.co2_tons,
+        systemSizeKW: estimate.system_size_kw ?? estimate.systemSizeKW,
+        annualSavings: estimate.annual_savings ?? estimate.annualSavings,
+        paybackYears: estimate.payback_years ?? estimate.paybackYears ?? estimate.payback_period_years,
+        co2Tons: estimate.co2_tons ?? estimate.co2Tons,
       };
 
-      await calculatorService.submitCalculator({
+      await calculatorsApi.createSubmission({
         name,
         phone,
-        email,
-        propertyType,
-        monthlyBill: bill,
-        roofArea,
-        ...normalized,
+        email: email || undefined,
+        property_type: propertyType,
+        monthly_bill: Number(bill) || 0,
+        roof_area: Number(roofArea) || 0,
+        system_size_kw: Number(normalized.systemSizeKW) || 0,
+        annual_savings: Number(normalized.annualSavings) || 0,
+        payback_period_years: Number(normalized.paybackYears) || 0,
+        calculator_type: "Solar Savings",
       });
 
       setResults(normalized);

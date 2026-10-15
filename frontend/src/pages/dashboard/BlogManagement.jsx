@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Plus,
   Search,
@@ -10,6 +10,7 @@ import {
   ChevronRight,
   FileText,
 } from "lucide-react";
+import { blogsApi } from "../../api/blogs";
 
 const CATEGORIES = [
   "Guides",
@@ -20,81 +21,6 @@ const CATEGORIES = [
   "Case Study",
 ];
 
-const INITIAL_POSTS = [
-  {
-    id: 1,
-    title: "Understanding Solar Microgrids: The Future of Energy Independence",
-    category: "Technology",
-    status: "Published",
-    author: "Admin",
-    date: "Sep 12, 2026",
-    excerpt:
-      "Discover how battery storage paired with high-efficiency rooftop solar arrays creates self-sustaining microgrids during utility grid outages.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=Technology+Article",
-  },
-  {
-    id: 2,
-    title: "10 Simple Ways Solar Panels Lower Your Heating & Cooling Bills",
-    category: "Savings",
-    status: "Published",
-    author: "Elena Rostova",
-    date: "Sep 08, 2026",
-    excerpt:
-      "Optimize your home's HVAC consumption by pairing smart thermostats with peak solar generation hours for maximum ROI.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=Savings+Article",
-  },
-  {
-    id: 3,
-    title: "Guide to 2026 Solar Tax Incentives and Federal Rebates",
-    category: "Policy",
-    status: "Published",
-    author: "Marcus Vance",
-    date: "Sep 01, 2026",
-    excerpt:
-      "Navigate the updated clean energy tax credit policies to save up to 30% on your system installation costs.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=Policy+Guide",
-  },
-  {
-    id: 4,
-    title: "Seasonal Maintenance Checklist for Commercial Solar Installations",
-    category: "Maintenance",
-    status: "Draft",
-    author: "Admin",
-    date: "Aug 28, 2026",
-    excerpt:
-      "Essential advice for seasonal panel cleaning, shade mitigation, inverter diagnostics, and wire inspection.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=Maintenance+Checklist",
-  },
-  {
-    id: 5,
-    title: "EV Charging at Home: Integrating Solar Panels with Electric Vehicles",
-    category: "Guides",
-    status: "Published",
-    author: "Sarah Jenkins",
-    date: "Aug 22, 2026",
-    excerpt:
-      "Calculate the exact solar kilowatt capacity needed to charge your electric vehicle using 100% clean, self-generated power.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=EV+Charging",
-  },
-  {
-    id: 6,
-    title: "How Apex Logistics Cut Energy Overhead by 65% with Rooftop Solar",
-    category: "Case Study",
-    status: "Draft",
-    author: "David Chen",
-    date: "Aug 15, 2026",
-    excerpt:
-      "A deep dive into how a 500 kW rooftop solar array transformed operating margins and cash flow for a regional hub.",
-    coverImage:
-      "https://placehold.co/600x400/EFF3EC/1F5C3E?text=Case+Study",
-  },
-];
-
 const ITEMS_PER_PAGE = 5;
 
 const emptyForm = {
@@ -103,45 +29,49 @@ const emptyForm = {
   status: "Draft",
   coverImage: "",
   excerpt: "",
+  content: "",
 };
 
 export default function BlogManagement() {
-  const [posts, setPosts] = useState(INITIAL_POSTS);
+  const [posts, setPosts] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedStatus, setSelectedStatus] = useState("All");
   const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingPost, setEditingPost] = useState(null);
   const [formData, setFormData] = useState(emptyForm);
 
-  // Filter posts based on search query, category, and status
-  const filteredPosts = useMemo(() => {
-    return posts.filter((post) => {
-      const matchesSearch = post.title
-        .toLowerCase()
-        .includes(searchQuery.toLowerCase().trim());
-      const matchesCategory =
-        selectedCategory === "All" || post.category === selectedCategory;
-      const matchesStatus =
-        selectedStatus === "All" || post.status === selectedStatus;
-      return matchesSearch && matchesCategory && matchesStatus;
-    });
-  }, [posts, searchQuery, selectedCategory, selectedStatus]);
+  const loadPosts = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await blogsApi.getBlogs({
+        page: currentPage,
+        limit: ITEMS_PER_PAGE,
+        search: searchQuery.trim(),
+        category: selectedCategory !== "All" ? selectedCategory : undefined,
+        status: selectedStatus !== "All" ? selectedStatus : undefined,
+      });
+      const items = Array.isArray(response) ? response : response.items || [];
+      setPosts(items);
+      setTotalPages(response.meta?.total_pages || response.total_pages || 1);
+    } catch (err) {
+      setError(err.message || "Failed to load blog posts.");
+    } finally {
+      setLoading(false);
+    }
+  }, [currentPage, searchQuery, selectedCategory, selectedStatus]);
 
-  // Calculate total pages
-  const totalPages = Math.ceil(filteredPosts.length / ITEMS_PER_PAGE) || 1;
-
-  // Safe current page clamping
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-
-  // Paginated slice
-  const paginatedPosts = useMemo(() => {
-    const start = (safeCurrentPage - 1) * ITEMS_PER_PAGE;
-    return filteredPosts.slice(start, start + ITEMS_PER_PAGE);
-  }, [filteredPosts, safeCurrentPage]);
+  useEffect(() => {
+    loadPosts();
+  }, [loadPosts]);
 
   // Modal Handlers
   const handleOpenCreateModal = () => {
@@ -154,10 +84,11 @@ export default function BlogManagement() {
     setEditingPost(post);
     setFormData({
       title: post.title,
-      category: post.category,
-      status: post.status,
-      coverImage: post.coverImage || "",
+      category: post.category || "Guides",
+      status: post.status || "Draft",
+      coverImage: post.cover_image || post.coverImage || "",
       excerpt: post.excerpt || "",
+      content: post.content || "",
     });
     setIsModalOpen(true);
   };
@@ -168,51 +99,51 @@ export default function BlogManagement() {
     setFormData(emptyForm);
   };
 
-  const handleSavePost = (e) => {
+  const handleSavePost = async (e) => {
     e.preventDefault();
     if (!formData.title.trim()) return;
 
-    if (editingPost) {
-      setPosts((prev) =>
-        prev.map((p) =>
-          p.id === editingPost.id
-            ? {
-                ...p,
-                title: formData.title.trim(),
-                category: formData.category,
-                status: formData.status,
-                coverImage: formData.coverImage.trim(),
-                excerpt: formData.excerpt.trim(),
-              }
-            : p
-        )
-      );
-    } else {
-      const newPost = {
-        id: Date.now(),
+    setSaving(true);
+    setError("");
+    try {
+      const payload = {
         title: formData.title.trim(),
         category: formData.category,
         status: formData.status,
-        author: "Admin",
-        date: new Date().toLocaleDateString("en-US", {
-          month: "short",
-          day: "2-digit",
-          year: "numeric",
-        }),
-        coverImage: formData.coverImage.trim(),
-        excerpt: formData.excerpt.trim(),
+        cover_image: formData.coverImage.trim() || undefined,
+        excerpt: formData.excerpt.trim() || undefined,
+        content: formData.content.trim() || formData.excerpt.trim() || undefined,
       };
-      setPosts((prev) => [newPost, ...prev]);
-    }
 
-    closeModal();
+      if (editingPost) {
+        await blogsApi.updateBlog(editingPost.id, payload);
+      } else {
+        await blogsApi.createBlog(payload);
+      }
+      closeModal();
+      await loadPosts();
+    } catch (err) {
+      setError(err.message || "Failed to save blog post.");
+    } finally {
+      setSaving(false);
+    }
   };
 
-  const handleDeletePost = (id) => {
+  const handleDeletePost = async (id) => {
     if (window.confirm("Are you sure you want to delete this blog post?")) {
-      setPosts((prev) => prev.filter((p) => p.id !== id));
+      setSaving(true);
+      try {
+        await blogsApi.deleteBlog(id);
+        await loadPosts();
+      } catch (err) {
+        setError(err.message || "Failed to delete post.");
+      } finally {
+        setSaving(false);
+      }
     }
   };
+
+  const safeCurrentPage = currentPage;
 
   return (
     <div className="space-y-6">
@@ -300,17 +231,17 @@ export default function BlogManagement() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100 dark:divide-[#293227]/60 text-gray-800 dark:text-gray-200">
-              {paginatedPosts.length > 0 ? (
-                paginatedPosts.map((post) => (
+              {posts.length > 0 ? (
+                posts.map((post) => (
                   <tr
                     key={post.id}
                     className="hover:bg-gray-50/80 dark:hover:bg-[#152019]/60 transition-colors"
                   >
                     <td className="py-4 px-5 max-w-xs sm:max-w-md">
                       <div className="flex items-center gap-3">
-                        {post.coverImage ? (
+                        {post.cover_image || post.coverImage ? (
                           <img
-                            src={post.coverImage}
+                            src={post.cover_image || post.coverImage}
                             alt={post.title}
                             className="w-10 h-10 rounded-lg object-cover shrink-0 border border-gray-200 dark:border-[#293227]"
                             onError={(e) => {
@@ -351,10 +282,10 @@ export default function BlogManagement() {
                       )}
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap text-gray-600 dark:text-gray-300">
-                      {post.author}
+                      {post.author || "Admin"}
                     </td>
                     <td className="py-4 px-4 whitespace-nowrap text-xs text-gray-500 dark:text-gray-400">
-                      {post.date}
+                      {post.created_at ? new Date(post.created_at).toLocaleDateString() : (post.date || "—")}
                     </td>
                     <td className="py-4 px-5 whitespace-nowrap text-right">
                       <div className="inline-flex items-center gap-1.5">

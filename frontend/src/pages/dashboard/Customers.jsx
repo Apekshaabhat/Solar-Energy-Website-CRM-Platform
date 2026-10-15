@@ -7,7 +7,7 @@ import StatusBadge from "../../components/dashboard/StatusBadge";
 import Pagination from "../../components/dashboard/Pagination";
 import Modal from "../../components/dashboard/Modal";
 import { FormField, SelectInput, TextInput } from "../../components/dashboard/FormField";
-import { customerService } from "../../services/customerService";
+import { customersApi } from "../../api/customers";
 import { useDashboardData } from "../../context/DashboardDataContext";
 
 const emptyForm = {
@@ -58,10 +58,10 @@ export default function Customers() {
     setLoading(true);
     setError("");
     try {
-      const response = await customerService.getCustomers({ page, limit: 10 });
+      const response = await customersApi.getCustomers({ page, limit: 10 });
       setCustomers(response.items || []);
-      setTotal(response.meta?.total || 0);
-      setTotalPages(response.meta?.total_pages || response.meta?.totalPages || 1);
+      setTotal(response.meta?.total || response.total || 0);
+      setTotalPages(response.meta?.total_pages || response.total_pages || response.totalPages || 1);
     } catch (err) {
       setError(err.message || "Unable to load customers.");
     } finally {
@@ -87,7 +87,7 @@ export default function Customers() {
     setOverviewLoading(true);
     setOverviewTab("overview");
     try {
-      const data = await customerService.getCustomerOverview(customer.id);
+      const data = await customersApi.getCustomerOverview(customer.id);
       setOverviewData(data);
       if (data.customer) {
         setOverviewCustomer(data.customer);
@@ -117,7 +117,7 @@ export default function Customers() {
     setError("");
     try {
       if (editingCustomer) {
-        await customerService.updateCustomer(editingCustomer.id, form);
+        await customersApi.updateCustomer(editingCustomer.id, form);
       }
       notifyCrmChange("customers");
       setModalOpen(false);

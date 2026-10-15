@@ -9,7 +9,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Eyebrow from "./Eyebrow";
-import { calculatorService } from "../services/calculatorService";
+import { calculatorsApi } from "../api/calculators";
 
 export default function ROIEstimator(props) {
   const theme = props.t || props.theme || {
@@ -40,16 +40,16 @@ export default function ROIEstimator(props) {
     setIsSubmitting(true);
 
     try {
-      const estimate = await calculatorService.calculateRoi({
-        systemSizeKW: systemSize,
-        monthlySavings,
-        subsidy,
+      const estimate = await calculatorsApi.estimateROI({
+        system_size_kw: Number(systemSize) || 0,
+        monthly_savings: Number(monthlySavings) || 0,
+        subsidy: Number(subsidy) || 0,
       });
       setResults({
-        netInvestment: estimate.net_investment,
-        paybackYears: estimate.payback_years,
-        lifetimeSavings: estimate.lifetime_savings,
-        roiPercent: estimate.roi_percent,
+        netInvestment: estimate.net_investment ?? estimate.netInvestment,
+        paybackYears: estimate.payback_years ?? estimate.paybackYears,
+        lifetimeSavings: estimate.lifetime_savings ?? estimate.lifetimeSavings,
+        roiPercent: estimate.roi_percent ?? estimate.roiPercent,
       });
       setCalculated(true);
     } catch (err) {

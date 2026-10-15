@@ -9,10 +9,13 @@ from app.models.blog import BlogPost
 from app.models.faq import FAQ
 from app.models.calculator import CalculatorSubmission, CalculatorSettings
 from app.models.settings import SystemSettings
+from app.models.token import RevokedToken, PasswordResetToken
 
 __all__ = [
     "Base",
     "User",
+    "RevokedToken",
+    "PasswordResetToken",
     "Customer",
     "Lead",
     "Project",
