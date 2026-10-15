@@ -4,6 +4,7 @@ from app.core.security import create_access_token
 from app.core.database import SessionLocal
 from app.models.customer import Customer
 from app.models.lead import Lead
+from app.models.project import Project
 from app.models.user import User
 from .conftest import auth_headers
 
@@ -585,6 +586,169 @@ def test_customer_access_is_scoped_to_assigned_staff_and_preserves_manager_acces
     ).status_code == 200
 
 
+def test_customer_profile_uses_explicit_account_relationship(client):
+    admin_headers = auth_headers(client, email="profile-admin@solara.test")
+    staff_headers_for_owner = staff_headers(client, "profile-staff@solara.test", "Sales Rep")
+    first_register = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "Profile Customer",
+            "email": "profile-customer@solara.test",
+            "password": "password123",
+        },
+    )
+    second_register = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "Other Customer",
+            "email": "other-customer@solara.test",
+            "password": "password123",
+        },
+    )
+    assert first_register.status_code == second_register.status_code == 201
+
+    def login_headers(email):
+        response = client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": "password123"},
+        )
+        assert response.status_code == 200
+        token = response.json()["access_token"]
+        return {"Authorization": "Bearer " + token}
+
+    customer_headers = login_headers("profile-customer@solara.test")
+    other_customer_headers = login_headers("other-customer@solara.test")
+
+    unlinked = client.get("/api/v1/customers/me", headers=customer_headers)
+    assert unlinked.status_code == 404
+    assert client.patch(
+        "/api/v1/customers/me",
+        json={"location": "Spoofed City"},
+        headers=customer_headers,
+    ).status_code == 404
+
+    with SessionLocal() as db:
+        customer_user_id = db.query(User.id).filter(
+            User.email == "profile-customer@solara.test"
+        ).scalar()
+        other_user_id = db.query(User.id).filter(
+            User.email == "other-customer@solara.test"
+        ).scalar()
+
+    created = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Linked Customer",
+            "contact": "profile-customer@solara.test",
+            "email": "profile-customer@solara.test",
+            "location": "Pune",
+            "account_user_id": customer_user_id,
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201
+    customer_id = created.json()["data"]["id"]
+
+    own_profile = client.get("/api/v1/customers/me", headers=customer_headers)
+    assert own_profile.status_code == 200
+    assert own_profile.json()["data"]["id"] == customer_id
+    assert own_profile.json()["data"]["account_user_id"] == customer_user_id
+    assert client.get(f"/api/v1/customers/{customer_id}", headers=customer_headers).status_code == 403
+    assert client.patch(
+        f"/api/v1/customers/{customer_id}",
+        json={"location": "Unauthorized City"},
+        headers=customer_headers,
+    ).status_code == 403
+
+    updated_profile = client.patch(
+        "/api/v1/customers/me",
+        json={"location": "Mumbai", "phone": "+91 90000 00000"},
+        headers=customer_headers,
+    )
+    assert updated_profile.status_code == 200
+    assert updated_profile.json()["data"]["location"] == "Mumbai"
+    assert updated_profile.json()["data"]["phone"] == "+91 90000 00000"
+    assert client.get("/api/v1/customers/me", headers=other_customer_headers).status_code == 404
+
+    with SessionLocal() as db:
+        linked_user = db.query(User).filter(
+            User.email == "profile-customer@solara.test"
+        ).one()
+        linked_user.role = "Sales Rep"
+        db.commit()
+    assert client.get("/api/v1/customers/me", headers=customer_headers).status_code == 403
+    with SessionLocal() as db:
+        linked_user = db.query(User).filter(
+            User.email == "profile-customer@solara.test"
+        ).one()
+        linked_user.role = "Customer"
+        db.commit()
+
+    denied_link = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Staff Cannot Link",
+            "contact": "staff@example.test",
+            "location": "Pune",
+            "account_user_id": other_user_id,
+        },
+        headers=staff_headers_for_owner,
+    )
+    assert denied_link.status_code == 403
+
+    duplicate_link = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Duplicate Link",
+            "contact": "duplicate@example.test",
+            "location": "Pune",
+            "account_user_id": customer_user_id,
+        },
+        headers=admin_headers,
+    )
+    assert duplicate_link.status_code == 400
+    invalid_link = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Invalid Link",
+            "contact": "invalid@example.test",
+            "location": "Pune",
+            "account_user_id": 999999,
+        },
+        headers=admin_headers,
+    )
+    assert invalid_link.status_code == 400
+
+    manager_headers = staff_headers(client, "profile-manager@solara.test", "Manager")
+    with SessionLocal() as db:
+        staff_user_id = db.query(User.id).filter(
+            User.email == "profile-staff@solara.test"
+        ).scalar()
+    manager_link = client.post(
+        "/api/v1/customers",
+        json={
+            "name": "Manager Linked Customer",
+            "contact": "other-customer@solara.test",
+            "location": "Pune",
+            "assigned_user_id": staff_user_id,
+            "account_user_id": other_user_id,
+        },
+        headers=manager_headers,
+    )
+    assert manager_link.status_code == 201
+    manager_link_data = manager_link.json()["data"]
+    assert manager_link_data["assigned_user_id"] == staff_user_id
+    assert manager_link_data["account_user_id"] == other_user_id
+    assert client.get("/api/v1/customers/me", headers=other_customer_headers).json()["data"]["id"] == (
+        manager_link_data["id"]
+    )
+
+    with SessionLocal() as db:
+        linked = db.query(Customer).filter(Customer.id == customer_id).one()
+        assert linked.location == "Mumbai"
+        assert db.query(Customer).filter(Customer.account_user_id == other_user_id).count() == 1
+
+
 def test_customer_token_cannot_assign_public_lead_ownership(client):
     register = client.post(
         "/api/v1/auth/register",
@@ -678,6 +842,274 @@ def test_customer_project_survey_and_dashboard_summary(client):
     stat_cards = {item["id"]: item["value"] for item in dashboard.json()["statCards"]}
     assert stat_cards["site-surveys"] == "1"
     assert stat_cards["completed-projects"] == "1"
+
+
+def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
+    admin_headers = auth_headers(client, email="project-auth-admin@solara.test")
+    manager_headers = staff_headers(client, "project-auth-manager@solara.test", "Manager")
+    owner_headers = staff_headers(client, "project-auth-owner@solara.test", "Sales Rep")
+    other_headers = staff_headers(client, "project-auth-other@solara.test", "Support")
+
+    def register_customer(name, email):
+        register = client.post(
+            "/api/v1/auth/register",
+            json={"name": name, "email": email, "password": "password123"},
+        )
+        assert register.status_code == 201
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": "password123"},
+        )
+        assert login.status_code == 200
+        return register.json()["data"], {"Authorization": "Bearer " + login.json()["access_token"]}
+
+    customer_user, customer_headers = register_customer(
+        "Linked Project Customer", "linked-project-customer@solara.test"
+    )
+    with SessionLocal() as db:
+        owner_id = db.query(User.id).filter(User.email == "project-auth-owner@solara.test").scalar()
+        other_id = db.query(User.id).filter(User.email == "project-auth-other@solara.test").scalar()
+
+    def create_customer(name, email, assigned_id, account_user_id=None, headers=admin_headers):
+        result = client.post(
+            "/api/v1/customers",
+            json={
+                "name": name,
+                "contact": email,
+                "email": email,
+                "location": "Pune",
+                "assigned_user_id": assigned_id,
+                "account_user_id": account_user_id,
+            },
+            headers=headers,
+        )
+        assert result.status_code == 201, result.text
+        return result.json()["data"]["id"]
+
+    owner_customer_id = create_customer(
+        "Owner Project Customer", "owner-project-customer@solara.test", owner_id
+    )
+    other_customer_id = create_customer(
+        "Other Project Customer", "other-project-customer@solara.test", other_id
+    )
+    account_customer_id = create_customer(
+        "Linked Project Customer",
+        "linked-project-customer@solara.test",
+        owner_id,
+        customer_user["id"],
+    )
+
+    def project_payload(name, **kwargs):
+        return {
+            "name": name,
+            "category": "Residential",
+            "location": "Pune",
+            "capacity": "5 kW",
+            **kwargs,
+        }
+
+    def create_project(name, headers, **kwargs):
+        result = client.post(
+            "/api/v1/projects",
+            json=project_payload(name, **kwargs),
+            headers=headers,
+        )
+        assert result.status_code == 201, result.text
+        return result.json()["data"]
+
+    owner_project = create_project(
+        "Owner Private Project",
+        owner_headers,
+        customer_id=owner_customer_id,
+        is_public=False,
+    )
+    other_project = create_project(
+        "Other Private Project",
+        manager_headers,
+        customer_id=other_customer_id,
+        assigned_user_id=other_id,
+        is_public=False,
+    )
+    customer_project = create_project(
+        "Customer Private Project",
+        manager_headers,
+        customer_id=account_customer_id,
+        assigned_user_id=other_id,
+        is_public=False,
+    )
+    manager_only_project = create_project(
+        "Unassigned Private Project",
+        manager_headers,
+        is_public=False,
+    )
+    public_project = create_project("Public Project", admin_headers, is_public=True)
+
+    assert owner_project["assigned_user_id"] == owner_id
+    assert client.get("/api/v1/projects").status_code == 200
+    public_ids = {item["id"] for item in client.get("/api/v1/projects").json()["data"]}
+    assert public_project["id"] in public_ids
+    assert owner_project["id"] not in public_ids
+    assert client.get(
+        f"/api/v1/projects/{owner_project['id']}", headers=owner_headers
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/projects/{owner_project['id']}", headers=other_headers
+    ).status_code == 404
+    assert client.get(f"/api/v1/projects/{owner_project['id']}").status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}", headers=owner_headers
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{manager_only_project['id']}", headers=owner_headers
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{customer_project['id']}", headers=customer_headers
+    ).status_code == 200
+    assert client.patch(
+        f"/api/v1/projects/{customer_project['id']}",
+        json={"name": "Customer Changed Project"},
+        headers=customer_headers,
+    ).status_code == 403
+    assert client.delete(
+        f"/api/v1/projects/{customer_project['id']}", headers=customer_headers
+    ).status_code == 403
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}", headers=customer_headers
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}", headers=other_headers
+    ).status_code == 200
+    customer_private_projects = client.get(
+        "/api/v1/projects", params={"is_public": False}, headers=customer_headers
+    ).json()["data"]
+    assert {item["id"] for item in customer_private_projects} == {customer_project["id"]}
+
+    owner_list = client.get("/api/v1/projects", headers=owner_headers)
+    assert owner_list.status_code == 200
+    owner_ids = {item["id"] for item in owner_list.json()["data"]}
+    assert owner_project["id"] in owner_ids
+    assert other_project["id"] not in owner_ids
+    assert manager_only_project["id"] not in owner_ids
+    assert client.get(
+        "/api/v1/projects", params={"search": "Other Private Project"}, headers=owner_headers
+    ).json()["data"] == []
+    owner_private_projects = client.get(
+        "/api/v1/projects", params={"is_public": False}, headers=owner_headers
+    ).json()["data"]
+    assert all(not item["is_public"] for item in owner_private_projects)
+    assert {item["id"] for item in owner_private_projects}.issubset(
+        {owner_project["id"], customer_project["id"]}
+    )
+    assert {item["id"] for item in client.get(
+        "/api/v1/projects", headers=manager_headers
+    ).json()["data"]}.issuperset(
+        {
+            owner_project["id"],
+            other_project["id"],
+            customer_project["id"],
+            manager_only_project["id"],
+            public_project["id"],
+        }
+    )
+
+    customer_cannot_create = client.post(
+        "/api/v1/projects",
+        json=project_payload("Customer Project Attempt"),
+        headers=customer_headers,
+    )
+    assert customer_cannot_create.status_code == 403
+
+    cannot_reassign_create = client.post(
+        "/api/v1/projects",
+        json=project_payload(
+            "Forged Assignment",
+            customer_id=owner_customer_id,
+            assigned_user_id=other_id,
+        ),
+        headers=owner_headers,
+    )
+    assert cannot_reassign_create.status_code == 403
+    cannot_link_other_customer = client.post(
+        "/api/v1/projects",
+        json=project_payload("Forged Customer", customer_id=other_customer_id),
+        headers=owner_headers,
+    )
+    assert cannot_link_other_customer.status_code == 400
+    invalid_customer = client.post(
+        "/api/v1/projects",
+        json=project_payload("Missing Customer", customer_id=999999),
+        headers=manager_headers,
+    )
+    assert invalid_customer.status_code == 400
+    customer_as_assignee = client.post(
+        "/api/v1/projects",
+        json=project_payload("Customer As Staff", assigned_user_id=customer_user["id"]),
+        headers=manager_headers,
+    )
+    assert customer_as_assignee.status_code == 400
+
+    cannot_update_others = client.patch(
+        f"/api/v1/projects/{other_project['id']}",
+        json={"name": "Hijacked Project"},
+        headers=owner_headers,
+    )
+    assert cannot_update_others.status_code == 404
+    cannot_change_assignment = client.patch(
+        f"/api/v1/projects/{owner_project['id']}",
+        json={"assigned_user_id": other_id},
+        headers=owner_headers,
+    )
+    assert cannot_change_assignment.status_code == 403
+    cannot_change_customer = client.patch(
+        f"/api/v1/projects/{owner_project['id']}",
+        json={"customer_id": other_customer_id},
+        headers=owner_headers,
+    )
+    assert cannot_change_customer.status_code == 400
+    cannot_edit_public_unowned = client.patch(
+        f"/api/v1/projects/{public_project['id']}",
+        json={"name": "Public project hijacked"},
+        headers=owner_headers,
+    )
+    assert cannot_edit_public_unowned.status_code == 404
+
+    owner_update = client.patch(
+        f"/api/v1/projects/{owner_project['id']}",
+        json={"status": "In Progress", "name": "Owner Updated Project"},
+        headers=owner_headers,
+    )
+    assert owner_update.status_code == 200
+    invalid_manager_assignment = client.patch(
+        f"/api/v1/projects/{manager_only_project['id']}",
+        json={"assigned_user_id": 999999},
+        headers=manager_headers,
+    )
+    assert invalid_manager_assignment.status_code == 400
+    manager_update = client.patch(
+        f"/api/v1/projects/{other_project['id']}",
+        json={"assigned_user_id": owner_id},
+        headers=manager_headers,
+    )
+    assert manager_update.status_code == 200
+    assert manager_update.json()["data"]["assigned_user_id"] == owner_id
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}", headers=owner_headers
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/projects/999999", headers=manager_headers
+    ).status_code == 404
+    assert client.patch(
+        "/api/v1/projects/999999", json={"name": "Missing"}, headers=manager_headers
+    ).status_code == 404
+    assert client.delete(
+        f"/api/v1/projects/{owner_project['id']}", headers=owner_headers
+    ).status_code == 403
+    assert client.delete(
+        f"/api/v1/projects/{manager_only_project['id']}", headers=manager_headers
+    ).status_code == 200
+    assert client.delete(
+        f"/api/v1/projects/{public_project['id']}", headers=admin_headers
+    ).status_code == 200
 
 
 def test_calculator_submission_public_create_staff_manage_settings(client):
@@ -868,3 +1300,280 @@ def test_site_survey_export_requires_staff_and_escapes_formulas(client):
     assert exported.status_code == 200
     assert exported.headers["content-type"].startswith("text/csv")
     assert "'=HYPERLINK" in exported.text
+
+
+def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
+    admin_headers = auth_headers(client, email="survey-admin@solara.test")
+    manager_headers = staff_headers(client, "survey-manager@solara.test", "Manager")
+    assigned_headers = staff_headers(client, "survey-assigned@solara.test", "Sales Rep")
+    other_staff_headers = staff_headers(client, "survey-other-staff@solara.test", "Support")
+
+    def register_customer(name, email):
+        registered = client.post(
+            "/api/v1/auth/register",
+            json={"name": name, "email": email, "password": "password123"},
+        )
+        assert registered.status_code == 201
+        token = client.post(
+            "/api/v1/auth/login",
+            json={"email": email, "password": "password123"},
+        )
+        assert token.status_code == 200
+        return registered.json()["data"], {"Authorization": "Bearer " + token.json()["access_token"]}
+
+    first_user, first_customer_headers = register_customer(
+        "Survey Customer One", "survey-customer-one@solara.test"
+    )
+    second_user, second_customer_headers = register_customer(
+        "Survey Customer Two", "survey-customer-two@solara.test"
+    )
+    with SessionLocal() as db:
+        assigned_user_id = db.query(User.id).filter(
+            User.email == "survey-assigned@solara.test"
+        ).scalar()
+        other_staff_id = db.query(User.id).filter(
+            User.email == "survey-other-staff@solara.test"
+        ).scalar()
+
+    def create_customer(name, email, account_user_id):
+        response = client.post(
+            "/api/v1/customers",
+            json={
+                "name": name,
+                "contact": email,
+                "email": email,
+                "location": "Pune",
+                "assigned_user_id": assigned_user_id,
+                "account_user_id": account_user_id,
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 201
+        return response.json()["data"]["id"]
+
+    customer_one_id = create_customer(
+        "Survey Customer One", "survey-customer-one@solara.test", first_user["id"]
+    )
+    customer_two_id = create_customer(
+        "Survey Customer Two", "survey-customer-two@solara.test", second_user["id"]
+    )
+    baseline_survey_count = client.get(
+        "/api/v1/site-surveys", headers=manager_headers
+    ).json()["total"]
+
+    def create_project(name, customer_id, assigned_id):
+        response = client.post(
+            "/api/v1/projects",
+            json={
+                "name": name,
+                "category": "Residential",
+                "location": "Pune",
+                "capacity": "5 kW",
+                "customer_id": customer_id,
+                "assigned_user_id": assigned_id,
+            },
+            headers=admin_headers,
+        )
+        assert response.status_code == 201
+        return response.json()["data"]["id"]
+
+    project_one_id = create_project("Survey Project One", customer_one_id, assigned_user_id)
+    project_two_id = create_project("Survey Project Two", customer_two_id, other_staff_id)
+
+    def create_survey(name, customer_id, project_id, assigned_id):
+        response = client.post(
+            "/api/v1/site-surveys",
+            json={
+                "customer_name": name,
+                "location": "Pune",
+                "survey_date": "2026-10-20",
+                "time_slot": "10:00 AM",
+                "customer_id": customer_id,
+                "project_id": project_id,
+                "assigned_user_id": assigned_id,
+            },
+            headers=manager_headers,
+        )
+        assert response.status_code == 201
+        return response.json()["data"]["id"]
+
+    survey_one_id = create_survey(
+        "Survey Customer One", customer_one_id, project_one_id, assigned_user_id
+    )
+    survey_two_id = create_survey(
+        "Survey Customer Two", customer_two_id, project_two_id, other_staff_id
+    )
+
+    public_booking = client.post(
+        "/api/v1/site-surveys",
+        json={
+            "customer_name": "Public Booking",
+            "location": "Pune",
+            "survey_date": "2026-10-21",
+            "time_slot": "11:00 AM",
+            "customer_id": customer_two_id,
+            "project_id": project_two_id,
+            "assigned_user_id": other_staff_id,
+            "status": "Completed",
+            "assigned_to": "Forged Surveyor",
+        },
+    )
+    assert public_booking.status_code == 201
+    assert public_booking.json()["data"]["customer_id"] is None
+    assert public_booking.json()["data"]["project_id"] is None
+    assert public_booking.json()["data"]["assigned_user_id"] is None
+    assert public_booking.json()["data"]["status"] == "Scheduled"
+    assert public_booking.json()["data"]["assigned_to"] == "Rahul"
+    customer_booking = client.post(
+        "/api/v1/site-surveys",
+        json={
+            "customer_name": "Survey Customer One",
+            "location": "Pune",
+            "survey_date": "2026-10-22",
+            "time_slot": "12:00 PM",
+            "customer_id": customer_one_id,
+            "project_id": project_one_id,
+            "assigned_user_id": other_staff_id,
+            "status": "Completed",
+        },
+        headers=first_customer_headers,
+    )
+    assert customer_booking.status_code == 201
+    assert customer_booking.json()["data"]["customer_id"] == customer_one_id
+    assert customer_booking.json()["data"]["project_id"] == project_one_id
+    assert customer_booking.json()["data"]["assigned_user_id"] is None
+    assert customer_booking.json()["data"]["status"] == "Scheduled"
+    denied_customer_booking = client.post(
+        "/api/v1/site-surveys",
+        json={
+            "customer_name": "Survey Customer One",
+            "location": "Pune",
+            "survey_date": "2026-10-23",
+            "time_slot": "01:00 PM",
+            "customer_id": customer_two_id,
+            "project_id": project_two_id,
+        },
+        headers=first_customer_headers,
+    )
+    assert denied_customer_booking.status_code == 403
+
+    assert client.get("/api/v1/site-surveys").status_code == 401
+    assert client.get(f"/api/v1/site-surveys/{survey_one_id}").status_code == 401
+    assert client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}", json={"status": "Completed"}
+    ).status_code == 401
+    assert client.delete(f"/api/v1/site-surveys/{survey_one_id}").status_code == 401
+
+    customer_list = client.get("/api/v1/site-surveys", headers=first_customer_headers)
+    assert customer_list.status_code == 200
+    assert {survey["id"] for survey in customer_list.json()["items"]} == {
+        survey_one_id,
+        customer_booking.json()["data"]["id"],
+    }
+    assert client.get(
+        f"/api/v1/site-surveys/{survey_one_id}", headers=first_customer_headers
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/site-surveys/{survey_two_id}", headers=first_customer_headers
+    ).status_code == 404
+    assert client.get(
+        "/api/v1/site-surveys", headers=second_customer_headers
+    ).json()["items"][0]["id"] == survey_two_id
+    assert client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"notes": "Customer cannot change survey"},
+        headers=first_customer_headers,
+    ).status_code == 403
+    assert client.delete(
+        f"/api/v1/site-surveys/{survey_one_id}", headers=first_customer_headers
+    ).status_code == 403
+
+    own_list = client.get("/api/v1/site-surveys", headers=assigned_headers)
+    assert own_list.status_code == 200
+    assert {survey["id"] for survey in own_list.json()["items"]} == {survey_one_id}
+    assert client.get(
+        f"/api/v1/site-surveys/{survey_one_id}", headers=assigned_headers
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/site-surveys/{survey_two_id}", headers=assigned_headers
+    ).status_code == 404
+    assert client.patch(
+        f"/api/v1/site-surveys/{survey_two_id}",
+        json={"status": "Completed"},
+        headers=assigned_headers,
+    ).status_code == 404
+
+    forbidden_assignment = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"assigned_user_id": other_staff_id},
+        headers=assigned_headers,
+    )
+    assert forbidden_assignment.status_code == 403
+    mismatched_project = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"project_id": project_two_id},
+        headers=assigned_headers,
+    )
+    assert mismatched_project.status_code == 400
+    mismatched_customer = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"customer_id": customer_two_id},
+        headers=assigned_headers,
+    )
+    assert mismatched_customer.status_code == 400
+    invalid_assignment = client.post(
+        "/api/v1/site-surveys",
+        json={
+            "customer_name": "Invalid Assignment",
+            "location": "Pune",
+            "survey_date": "2026-10-22",
+            "time_slot": "11:00 AM",
+            "customer_id": customer_one_id,
+            "assigned_user_id": first_user["id"],
+        },
+        headers=manager_headers,
+    )
+    assert invalid_assignment.status_code == 400
+
+    staff_update = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"status": "In Progress", "notes": "Site access confirmed"},
+        headers=assigned_headers,
+    )
+    assert staff_update.status_code == 200
+    assert staff_update.json()["data"]["status"] == "In Progress"
+    assert client.get("/api/v1/site-surveys", headers=other_staff_headers).json()["total"] == 1
+    assert client.get("/api/v1/site-surveys", headers=manager_headers).json()["total"] == (
+        baseline_survey_count + 4
+    )
+    assert client.get("/api/v1/site-surveys", headers=admin_headers).json()["total"] == (
+        baseline_survey_count + 4
+    )
+    assert client.get(
+        "/api/v1/site-surveys/999999", headers=manager_headers
+    ).status_code == 404
+    admin_assignment = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"assigned_user_id": other_staff_id},
+        headers=admin_headers,
+    )
+    assert admin_assignment.status_code == 200
+    assert admin_assignment.json()["data"]["assigned_user_id"] == other_staff_id
+    manager_assignment = client.patch(
+        f"/api/v1/site-surveys/{survey_one_id}",
+        json={"assigned_user_id": assigned_user_id},
+        headers=manager_headers,
+    )
+    assert manager_assignment.status_code == 200
+    assert manager_assignment.json()["data"]["assigned_user_id"] == assigned_user_id
+
+    assert client.delete(
+        f"/api/v1/site-surveys/{survey_one_id}", headers=assigned_headers
+    ).status_code == 403
+    deleted = client.delete(
+        f"/api/v1/site-surveys/{survey_two_id}", headers=manager_headers
+    )
+    assert deleted.status_code == 200
+    assert client.get(
+        f"/api/v1/site-surveys/{survey_two_id}", headers=admin_headers
+    ).status_code == 404

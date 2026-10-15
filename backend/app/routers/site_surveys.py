@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, desc
 
 from app.core.database import get_db
-from app.dependencies.auth import get_optional_current_user, is_staff_user, require_roles
+from app.dependencies.auth import (
+    get_current_user,
+    get_optional_current_user,
+    is_staff_user,
+    require_roles,
+)
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.project import Project
@@ -37,30 +42,104 @@ NULLABLE_SURVEY_FIELDS = {
     "capacity_estimate",
     "notes",
 }
+SURVEY_MANAGER_ROLES = {"admin", "manager"}
+
+
+def is_survey_manager(user: User) -> bool:
+    return user.role.lower() in SURVEY_MANAGER_ROLES
+
+
+def accessible_surveys_query(db: Session, current_user: User):
+    query = db.query(SiteSurvey)
+    if is_survey_manager(current_user):
+        return query
+    if is_staff_user(current_user):
+        return query.filter(SiteSurvey.assigned_user_id == current_user.id)
+    if current_user.role.lower() == "customer":
+        return (
+            query.join(Customer, SiteSurvey.customer_id == Customer.id)
+            .outerjoin(Project, SiteSurvey.project_id == Project.id)
+            .filter(
+                Customer.account_user_id == current_user.id,
+                or_(
+                    SiteSurvey.project_id.is_(None),
+                    Project.customer_id == SiteSurvey.customer_id,
+                ),
+            )
+        )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Operation not permitted")
 
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
     if user_id is None:
         return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not is_staff_user(user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned staff user not found")
 
 
-def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None:
+def validate_customer_reference(
+    db: Session,
+    customer_id: Optional[int],
+    current_user: Optional[User] = None,
+) -> Optional[Customer]:
     if customer_id is None:
-        return
-    exists = db.query(Customer.id).filter(Customer.id == customer_id).first()
-    if not exists:
+        return None
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    if current_user is not None and is_staff_user(current_user) and not is_survey_manager(current_user):
+        query = query.filter(Customer.assigned_user_id == current_user.id)
+    customer = query.first()
+    if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
+    return customer
 
 
-def validate_project_reference(db: Session, project_id: Optional[int]) -> None:
+def validate_project_reference(
+    db: Session,
+    project_id: Optional[int],
+    current_user: Optional[User] = None,
+    customer_id: Optional[int] = None,
+) -> Optional[Project]:
     if project_id is None:
-        return
-    exists = db.query(Project.id).filter(Project.id == project_id).first()
-    if not exists:
+        return None
+    query = db.query(Project).filter(Project.id == project_id)
+    if customer_id is not None:
+        query = query.filter(Project.customer_id == customer_id)
+    if current_user is not None and is_staff_user(current_user) and not is_survey_manager(current_user):
+        query = query.join(Customer, Project.customer_id == Customer.id).filter(
+            Customer.assigned_user_id == current_user.id
+        )
+    project = query.first()
+    if project is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project not found")
+    if project.customer_id != customer_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Project must belong to the selected customer",
+        )
+    return project
+
+
+def validate_survey_relationships(
+    db: Session,
+    customer_id: Optional[int],
+    project_id: Optional[int],
+    current_user: Optional[User] = None,
+) -> None:
+    validate_customer_reference(db, customer_id, current_user)
+    validate_project_reference(db, project_id, current_user, customer_id)
+
+
+def customer_profile_for_user(db: Session, user: User) -> Optional[Customer]:
+    profiles = (
+        db.query(Customer)
+        .filter(Customer.account_user_id == user.id)
+        .limit(2)
+        .all()
+    )
+    if len(profiles) > 1:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer profile not found")
+    return profiles[0] if profiles else None
 
 
 def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
@@ -99,10 +178,10 @@ def list_surveys(
     property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(SiteSurvey)
+    query = accessible_surveys_query(db, current_user)
 
     if search:
         s = f"%{search.strip()}%"
@@ -161,7 +240,7 @@ def export_surveys(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    query = db.query(SiteSurvey)
+    query = accessible_surveys_query(db, current_user)
 
     if search:
         search_value = f"%{search.strip()}%"
@@ -213,11 +292,43 @@ def create_survey(
     db: Session = Depends(get_db),
 ):
     is_staff = is_staff_user(current_user)
+<<<<<<< HEAD
     if is_staff:
         validate_customer_reference(db, request.customer_id)
         validate_project_reference(db, request.project_id)
         validate_lead_reference(db, request.lead_id)
         validate_user_reference(db, request.assigned_user_id)
+=======
+    customer_id = None
+    project_id = None
+    assigned_user_id = None
+    if current_user is not None and is_staff:
+        if is_survey_manager(current_user):
+            assigned_user_id = request.assigned_user_id
+            validate_user_reference(db, assigned_user_id)
+        else:
+            if request.assigned_user_id not in (None, current_user.id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only administrators and managers can assign surveys to other users",
+                )
+            assigned_user_id = current_user.id
+        customer_id = request.customer_id
+        project_id = request.project_id
+        validate_survey_relationships(db, customer_id, project_id, current_user)
+    elif current_user is not None and current_user.role.lower() == "customer":
+        customer = customer_profile_for_user(db, current_user)
+        if request.customer_id is not None and (
+            customer is None or request.customer_id != customer.id
+        ):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer access denied")
+        if request.project_id is not None:
+            if customer is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+            validate_project_reference(db, request.project_id, customer_id=customer.id)
+        customer_id = customer.id if customer is not None else None
+        project_id = request.project_id
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
 
     customer_name = request.customer_name.strip()
     if request.customer_id:
@@ -231,12 +342,20 @@ def create_survey(
         property_type=request.property_type,
         survey_date=request.survey_date.strip(),
         time_slot=request.time_slot.strip(),
+<<<<<<< HEAD
         assigned_to=request.assigned_to.strip(),
         status=request.status or "Scheduled",
         customer_id=request.customer_id if is_staff else None,
         project_id=request.project_id if is_staff else None,
         lead_id=request.lead_id if is_staff else None,
         assigned_user_id=request.assigned_user_id if is_staff else None,
+=======
+        assigned_to=request.assigned_to.strip() if is_staff else "Rahul",
+        status=request.status if is_staff and request.status else "Scheduled",
+        customer_id=customer_id,
+        project_id=project_id,
+        assigned_user_id=assigned_user_id,
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
         roof_information=request.roof_information,
         capacity_estimate=request.capacity_estimate,
         notes=request.notes,
@@ -279,10 +398,10 @@ def create_survey(
 )
 def get_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    survey = accessible_surveys_query(db, current_user).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
     return APIResponse(success=True, data=SiteSurveyResponse.model_validate(survey))
@@ -359,12 +478,13 @@ def update_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    survey = accessible_surveys_query(db, current_user).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
 
     old_status = survey.status
     update_data = request.model_dump(exclude_unset=True)
+<<<<<<< HEAD
     target_status = update_data.get("status")
 
     if target_status and target_status != old_status:
@@ -383,6 +503,20 @@ def update_survey(
     validate_customer_reference(db, update_data.get("customer_id"))
     validate_project_reference(db, update_data.get("project_id"))
     validate_lead_reference(db, update_data.get("lead_id"))
+=======
+    if (
+        "assigned_user_id" in update_data
+        and not is_survey_manager(current_user)
+        and update_data["assigned_user_id"] != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and managers can change survey assignments",
+        )
+    customer_id = update_data.get("customer_id", survey.customer_id)
+    project_id = update_data.get("project_id", survey.project_id)
+    validate_survey_relationships(db, customer_id, project_id, current_user)
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_survey_update(survey, update_data)
 

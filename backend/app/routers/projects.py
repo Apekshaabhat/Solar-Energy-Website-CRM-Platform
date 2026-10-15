@@ -1,6 +1,6 @@
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc
 
 from app.core.database import get_db
@@ -16,6 +16,7 @@ from app.services.crm_service import CRMService
 
 router = APIRouter(prefix="/projects", tags=["Projects Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
+PROJECT_MANAGER_ROLES = {"admin", "manager"}
 NULLABLE_PROJECT_FIELDS = {
     "capacity_kw",
     "customer_id",
@@ -29,19 +30,78 @@ NULLABLE_PROJECT_FIELDS = {
 }
 
 
+def is_project_manager(user: User) -> bool:
+    return user.role.lower() in PROJECT_MANAGER_ROLES
+
+
+def accessible_projects_query(
+    db: Session,
+    current_user: Optional[User],
+) -> SQLAlchemyQuery[Project]:
+    query = db.query(Project)
+    if current_user is None:
+        return query.filter(Project.is_public.is_(True))
+    if is_project_manager(current_user):
+        return query
+    if is_staff_user(current_user):
+        return manageable_projects_query(db, current_user).filter(
+            or_(
+                Project.is_public.is_(True),
+                Project.assigned_user_id == current_user.id,
+                Customer.assigned_user_id == current_user.id,
+            )
+        )
+    if current_user.role.lower() == "customer":
+        return (
+            query.outerjoin(Customer, Project.customer_id == Customer.id)
+            .filter(
+                or_(
+                    Project.is_public.is_(True),
+                    Customer.account_user_id == current_user.id,
+                )
+            )
+        )
+    return query.filter(Project.is_public.is_(True))
+
+
+def manageable_projects_query(
+    db: Session,
+    current_user: User,
+) -> SQLAlchemyQuery[Project]:
+    query = db.query(Project)
+    if is_project_manager(current_user):
+        return query
+    return (
+        query.outerjoin(Customer, Project.customer_id == Customer.id)
+        .filter(
+            or_(
+                Project.assigned_user_id == current_user.id,
+                Customer.assigned_user_id == current_user.id,
+            )
+        )
+    )
+
+
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
     if user_id is None:
         return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or not is_staff_user(user):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned staff user not found")
 
 
-def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None:
+def validate_customer_reference(
+    db: Session,
+    customer_id: Optional[int],
+    current_user: Optional[User] = None,
+) -> None:
     if customer_id is None:
         return
-    exists = db.query(Customer.id).filter(Customer.id == customer_id).first()
-    if not exists:
+    query = db.query(Customer).filter(Customer.id == customer_id)
+    if current_user is not None and is_staff_user(current_user) and not is_project_manager(current_user):
+        query = query.filter(Customer.assigned_user_id == current_user.id)
+    customer = query.first()
+    if customer is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
 
 
@@ -85,11 +145,7 @@ def list_projects(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Project)
-    is_staff = is_staff_user(current_user)
-
-    if not is_staff:
-        query = query.filter(Project.is_public == True)
+    query = accessible_projects_query(db, current_user)
 
     if search:
         s = f"%{search.strip()}%"
@@ -107,7 +163,7 @@ def list_projects(
     if status_filter and status_filter not in ["All", "All Status", "All Statuses"]:
         query = query.filter(Project.status.ilike(status_filter))
 
-    if is_public is not None and is_staff:
+    if is_public is not None:
         query = query.filter(Project.is_public == is_public)
 
     projects = query.order_by(desc(Project.created_at)).all()
@@ -127,9 +183,23 @@ def create_project(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+<<<<<<< HEAD
     validate_customer_reference(db, request.customer_id)
     validate_lead_reference(db, request.source_lead_id)
     validate_user_reference(db, request.assigned_user_id)
+=======
+    if is_project_manager(current_user):
+        assigned_user_id = request.assigned_user_id
+        validate_user_reference(db, assigned_user_id)
+    else:
+        if request.assigned_user_id not in (None, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can assign projects to other users",
+            )
+        assigned_user_id = current_user.id
+    validate_customer_reference(db, request.customer_id, current_user)
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
 
     project = Project(
         name=request.name.strip(),
@@ -139,8 +209,12 @@ def create_project(
         capacity_kw=request.capacity_kw,
         status=request.status or "Planning",
         customer_id=request.customer_id,
+<<<<<<< HEAD
         source_lead_id=request.source_lead_id,
         assigned_user_id=request.assigned_user_id,
+=======
+        assigned_user_id=assigned_user_id,
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
         image_url=request.image_url,
         is_public=request.is_public,
         estimated_cost=request.estimated_cost,
@@ -279,13 +353,20 @@ def get_project(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = accessible_projects_query(db, current_user).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+<<<<<<< HEAD
     is_staff = is_staff_user(current_user)
     if not project.is_public and not is_staff:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return APIResponse(success=True, data=build_project_response(project))
+=======
+    resp = ProjectResponse.model_validate(project)
+    if project.customer:
+        resp.customer_name = project.customer.name
+    return APIResponse(success=True, data=resp)
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
 
 
 @router.patch(
@@ -299,12 +380,13 @@ def update_project(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = manageable_projects_query(db, current_user).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     old_status = project.status
     update_data = request.model_dump(exclude_unset=True)
+<<<<<<< HEAD
     target_status = update_data.get("status")
 
     if target_status and target_status != old_status:
@@ -324,6 +406,18 @@ def update_project(
 
     validate_customer_reference(db, update_data.get("customer_id"))
     validate_lead_reference(db, update_data.get("source_lead_id"))
+=======
+    if (
+        "assigned_user_id" in update_data
+        and not is_project_manager(current_user)
+        and update_data["assigned_user_id"] != current_user.id
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and managers can change project assignments",
+        )
+    validate_customer_reference(db, update_data.get("customer_id"), current_user)
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_project_update(project, update_data)
 

@@ -6,10 +6,11 @@ from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
 
 from app.core.database import get_db
-from app.dependencies.auth import require_roles
+from app.dependencies.auth import get_current_user, require_roles
 from app.models.user import User
 from app.models.customer import Customer
 from app.models.project import Project
+<<<<<<< HEAD
 from app.models.lead import Lead
 from app.models.site_survey import SiteSurvey
 from app.models.activity import Activity
@@ -18,6 +19,14 @@ from app.schemas.lead import LeadResponse
 from app.schemas.site_survey import SiteSurveyResponse
 from app.schemas.project import ProjectResponse
 from app.schemas.activity import ActivityResponse
+=======
+from app.schemas.customer import (
+    CustomerCreate,
+    CustomerProfileUpdate,
+    CustomerUpdate,
+    CustomerResponse,
+)
+>>>>>>> 2192789 (Implement customer, survey and project authorization)
 from app.schemas.common import APIResponse, PaginatedResponse, PaginationMeta
 from app.services.crm_service import CRMService
 from app.services.dashboard_service import format_relative_time
@@ -45,6 +54,30 @@ def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
     exists = db.query(User.id).filter(User.id == user_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+
+
+def validate_customer_account_reference(
+    db: Session,
+    user_id: Optional[int],
+    customer_id: Optional[int] = None,
+) -> None:
+    if user_id is None:
+        return
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None or user.role.lower() != "customer":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Customer account not found",
+        )
+    existing_link_query = db.query(Customer.id).filter(Customer.account_user_id == user_id)
+    if customer_id is not None:
+        existing_link_query = existing_link_query.filter(Customer.id != customer_id)
+    existing_link = existing_link_query.first()
+    if existing_link:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Customer account is already linked to another customer record",
+        )
 
 
 def apply_customer_update(customer: Customer, update_data: dict) -> None:
@@ -132,11 +165,17 @@ def create_customer(
     if is_customer_manager(current_user):
         assigned_user_id = request.assigned_user_id
         validate_user_reference(db, assigned_user_id)
+        validate_customer_account_reference(db, request.account_user_id)
     else:
         if request.assigned_user_id not in (None, current_user.id):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only administrators and managers can assign customers to other users",
+            )
+        if request.account_user_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can link customer accounts",
             )
         assigned_user_id = current_user.id
 
@@ -150,6 +189,7 @@ def create_customer(
         status=request.status or "Active",
         customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),
         assigned_user_id=assigned_user_id,
+        account_user_id=request.account_user_id if is_customer_manager(current_user) else None,
     )
     db.add(customer)
     db.flush()
@@ -173,6 +213,62 @@ def create_customer(
     resp = CustomerResponse.model_validate(customer)
     resp.total_projects = 0
     return APIResponse(success=True, message="Customer created successfully", data=resp)
+
+
+def get_linked_customer(db: Session, current_user: User) -> Customer:
+    if current_user.role.lower() != "customer":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Customer account access required",
+        )
+    customers = (
+        db.query(Customer)
+        .filter(Customer.account_user_id == current_user.id)
+        .limit(2)
+        .all()
+    )
+    if len(customers) != 1:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer profile not found")
+    return customers[0]
+
+
+@router.get(
+    "/me",
+    response_model=APIResponse[CustomerResponse],
+    summary="Get the authenticated customer's profile",
+)
+def get_my_customer_profile(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    customer = get_linked_customer(db, current_user)
+    resp = CustomerResponse.model_validate(customer)
+    resp.total_projects = (
+        db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
+    )
+    return APIResponse(success=True, data=resp)
+
+
+@router.patch(
+    "/me",
+    response_model=APIResponse[CustomerResponse],
+    summary="Update the authenticated customer's profile",
+)
+def update_my_customer_profile(
+    request: CustomerProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    customer = get_linked_customer(db, current_user)
+    update_data = request.model_dump(exclude_unset=True)
+    apply_customer_update(customer, update_data)
+    db.commit()
+    db.refresh(customer)
+    resp = CustomerResponse.model_validate(customer)
+    resp.total_projects = (
+        db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
+    )
+    return APIResponse(success=True, message="Customer profile updated successfully", data=resp)
 
 
 @router.get(
@@ -299,6 +395,11 @@ def update_customer(
 
     old_status = customer.status
     update_data = request.model_dump(exclude_unset=True)
+    if "account_user_id" in update_data and not is_customer_manager(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators and managers can link customer accounts",
+        )
     if (
         "assigned_user_id" in update_data
         and not is_customer_manager(current_user)
@@ -309,6 +410,8 @@ def update_customer(
             detail="Only administrators and managers can change customer assignments",
         )
     validate_user_reference(db, update_data.get("assigned_user_id"))
+    if "account_user_id" in update_data:
+        validate_customer_account_reference(db, update_data["account_user_id"], customer.id)
     apply_customer_update(customer, update_data)
 
     if customer.status != old_status:
