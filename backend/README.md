@@ -50,19 +50,16 @@ The seed admin login is `admin@solara.com` and uses the password configured in `
 - Seed admin account: `admin@solara.com` / `admin123`
 - Database tables populated: `users`, `customers`, `leads`, `site_surveys`, `projects`, `activities`, `blogs`, `faqs`, `system_settings`.
 
-<<<<<<< HEAD
 ---
-
-## Running the API Server
-=======
 ## Customer account profiles
 
 Migration `003_customer_account_relationship` adds a nullable, unique `customers.account_user_id` foreign key for the customer login account. It is separate from `assigned_user_id`, which continues to identify the staff member responsible for the CRM record. The migration does not infer or backfill ownership from matching email addresses; an administrator or manager must explicitly link an existing customer account through the customer create/update API using `account_user_id`.
 
 Once linked, the authenticated customer can read or update their own profile through `GET` and `PATCH /api/v1/customers/me`. Customer profile routes resolve the record from the authenticated account; they do not accept a customer ID.
 
-## Run
->>>>>>> 2192789 (Implement customer, survey and project authorization)
+---
+
+## Running the API Server
 
 ```powershell
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

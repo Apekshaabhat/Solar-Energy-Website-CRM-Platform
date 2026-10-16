@@ -13,6 +13,7 @@ from app.models.site_survey import SiteSurvey
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.schemas.common import APIResponse
 from app.services.crm_service import CRMService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/projects", tags=["Projects Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
@@ -28,7 +29,6 @@ NULLABLE_PROJECT_FIELDS = {
     "start_date",
     "completion_date",
 }
-
 
 def is_project_manager(user: User) -> bool:
     return user.role.lower() in PROJECT_MANAGER_ROLES
@@ -84,10 +84,15 @@ def manageable_projects_query(
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
     if user_id is None:
-        return
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None or not is_staff_user(user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned staff user not found")
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to an inactive user account.")
+    if target_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to a non-staff user account.")
+    return target_user
 
 
 def validate_customer_reference(
@@ -111,6 +116,20 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
     exists = db.query(Lead.id).filter(Lead.id == lead_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source lead not found")
+
+
+def check_project_access(project: Project, current_user: Optional[User]) -> None:
+    if project.is_public:
+        return
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role == "Customer" and current_user.customer_id and project.customer_id == current_user.customer_id:
+        return
+    if current_user.role in ["Sales Rep", "Support"] and project.assigned_user_id == current_user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this project.")
 
 
 def apply_project_update(project: Project, update_data: dict) -> None:
@@ -183,11 +202,6 @@ def create_project(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-<<<<<<< HEAD
-    validate_customer_reference(db, request.customer_id)
-    validate_lead_reference(db, request.source_lead_id)
-    validate_user_reference(db, request.assigned_user_id)
-=======
     if is_project_manager(current_user):
         assigned_user_id = request.assigned_user_id
         validate_user_reference(db, assigned_user_id)
@@ -199,7 +213,7 @@ def create_project(
             )
         assigned_user_id = current_user.id
     validate_customer_reference(db, request.customer_id, current_user)
->>>>>>> 2192789 (Implement customer, survey and project authorization)
+    validate_lead_reference(db, request.source_lead_id)
 
     project = Project(
         name=request.name.strip(),
@@ -209,12 +223,8 @@ def create_project(
         capacity_kw=request.capacity_kw,
         status=request.status or "Planning",
         customer_id=request.customer_id,
-<<<<<<< HEAD
         source_lead_id=request.source_lead_id,
-        assigned_user_id=request.assigned_user_id,
-=======
         assigned_user_id=assigned_user_id,
->>>>>>> 2192789 (Implement customer, survey and project authorization)
         image_url=request.image_url,
         is_public=request.is_public,
         estimated_cost=request.estimated_cost,
@@ -245,6 +255,17 @@ def create_project(
         user_id=current_user.id,
         status_val=project.status,
     )
+
+    if project.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=project.assigned_user_id,
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
 
     db.commit()
     db.refresh(project)
@@ -356,17 +377,9 @@ def get_project(
     project = accessible_projects_query(db, current_user).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-<<<<<<< HEAD
-    is_staff = is_staff_user(current_user)
-    if not project.is_public and not is_staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    check_project_access(project, current_user)
     return APIResponse(success=True, data=build_project_response(project))
-=======
-    resp = ProjectResponse.model_validate(project)
-    if project.customer:
-        resp.customer_name = project.customer.name
-    return APIResponse(success=True, data=resp)
->>>>>>> 2192789 (Implement customer, survey and project authorization)
+
 
 
 @router.patch(
@@ -385,8 +398,8 @@ def update_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     old_status = project.status
+    old_assigned = project.assigned_user_id
     update_data = request.model_dump(exclude_unset=True)
-<<<<<<< HEAD
     target_status = update_data.get("status")
 
     if target_status and target_status != old_status:
@@ -403,10 +416,6 @@ def update_project(
         elif target_status == "Cancelled":
             project = CRMService.project_cancel_workflow(db, project_id, current_user.id)
         update_data.pop("status", None)
-
-    validate_customer_reference(db, update_data.get("customer_id"))
-    validate_lead_reference(db, update_data.get("source_lead_id"))
-=======
     if (
         "assigned_user_id" in update_data
         and not is_project_manager(current_user)
@@ -417,9 +426,31 @@ def update_project(
             detail="Only administrators and managers can change project assignments",
         )
     validate_customer_reference(db, update_data.get("customer_id"), current_user)
->>>>>>> 2192789 (Implement customer, survey and project authorization)
+    validate_lead_reference(db, update_data.get("source_lead_id"))
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_project_update(project, update_data)
+
+    if target_status and target_status != old_status and project.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=project.assigned_user_id,
+            title="Project Status Updated",
+            message=f"Project '{project.name}' moved to {target_status}.",
+            notification_type="project_status",
+            entity_type="project",
+            entity_id=project.id,
+        )
+
+    if "assigned_user_id" in update_data and update_data["assigned_user_id"] and update_data["assigned_user_id"] != old_assigned:
+        NotificationService.create_notification(
+            db=db,
+            user_id=update_data["assigned_user_id"],
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
 
     db.commit()
     db.refresh(project)
@@ -487,4 +518,3 @@ def delete_project(
 ):
     CRMService.project_cancel_workflow(db, project_id, current_user.id)
     return APIResponse(success=True, message="Project cancelled successfully (history preserved)", data=True)
-

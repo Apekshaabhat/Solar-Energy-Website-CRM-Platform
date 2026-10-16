@@ -1,4 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { authService } from "../services/authService";
+import { getAuthToken, getStoredUser, clearAuthSession, setAuthSession } from "../services/api";
 import { Navigate, useLocation } from "react-router-dom";
 import authApi from "../api/auth";
 import { getToken, getStoredUser, clearAuth } from "../api/client";

@@ -11,6 +11,7 @@ from app.schemas.auth import (
     Token,
     LoginRequest,
     RegisterRequest,
+    ActivateAccountRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     ActivateRequest,
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     response_model=APIResponse[Optional[UserResponse]],
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
+    description="Registers a new customer user and returns user details. Passwords must be at least 6 characters.",
     description="Registers a new customer account in Pending status. Does not reveal whether email exists.",
 )
 @limiter.limit(settings.AUTH_RATE_LIMIT)
@@ -43,6 +45,22 @@ def register(
         message="Registration request submitted. Your account is pending administrator approval.",
         data=None,
     )
+
+
+@router.post(
+    "/activate",
+    response_model=APIResponse[UserResponse],
+    summary="Activate invited user account",
+    description="Validates single-use expiring invitation token and sets the initial account password.",
+)
+def activate(request: ActivateAccountRequest, db: Session = Depends(get_db)):
+    user = AuthService.activate_account(db, request)
+    return APIResponse(
+        success=True,
+        message="Account activated successfully. You may now log in.",
+        data=UserResponse.model_validate(user),
+    )
+
 
 
 @router.post(

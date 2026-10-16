@@ -1,20 +1,69 @@
-from typing import Optional
+from typing import Optional, Dict, Any
 from datetime import datetime
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from app.schemas.validators import AppEmailStr
+
+ALLOWED_ROLES = ["Admin", "Manager", "Sales Rep", "Support", "Customer"]
+ALLOWED_STATUSES = ["Active", "Invited", "Inactive"]
 
 
 class UserBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     email: AppEmailStr
     phone: Optional[str] = None
-    role: str = Field(default="Sales Rep")  # Admin, Manager, Sales Rep, Support, Customer
-    status: str = Field(default="Active")  # Active, Invited, Inactive
+    role: str = Field(default="Sales Rep")
+    status: str = Field(default="Active")
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        for allowed in ALLOWED_ROLES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        for allowed in ALLOWED_STATUSES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid status '{v}'. Allowed statuses: {', '.join(ALLOWED_STATUSES)}")
 
 
-class UserCreate(UserBase):
-    password: str = Field(..., min_length=6, max_length=128)
+class UserCreate(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    email: AppEmailStr
+    phone: Optional[str] = None
+    role: str = Field(default="Sales Rep")
+    status: Optional[str] = Field(default="Invited")
+    password: Optional[str] = Field(default=None, min_length=6)
+    customer_id: Optional[int] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        for allowed in ALLOWED_ROLES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+
+
+class UserInviteRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=100)
+    email: AppEmailStr
+    role: str = Field(default="Sales Rep")
+    phone: Optional[str] = None
+    customer_id: Optional[int] = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: str) -> str:
+        for allowed in ALLOWED_ROLES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
 
 
 class UserUpdate(BaseModel):
@@ -23,13 +72,61 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = None
     role: Optional[str] = None
     status: Optional[str] = None
-    password: Optional[str] = Field(None, min_length=6)
+    customer_id: Optional[int] = None
+    password: Optional[str] = Field(None, min_length=8)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        for allowed in ALLOWED_ROLES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        for allowed in ALLOWED_STATUSES:
+            if v.strip().lower() == allowed.lower():
+                return allowed
+        raise ValueError(f"Invalid status '{v}'. Allowed statuses: {', '.join(ALLOWED_STATUSES)}")
 
 
-class UserResponse(UserBase):
+class UserResponse(BaseModel):
     id: int
+    name: str
+    email: str
+    phone: Optional[str] = None
+    role: str
+    status: str
+    customer_id: Optional[int] = None
     last_login: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class UserStatsResponse(BaseModel):
+    total_users: int
+    active_users: int
+    inactive_users: int
+    invited_users: int
+    users_by_role: Dict[str, int]
+    totalUsers: Optional[int] = None
+    activeUsers: Optional[int] = None
+    inactiveUsers: Optional[int] = None
+    invitedUsers: Optional[int] = None
+    usersByRole: Optional[Dict[str, int]] = None
+
+    def model_post_init(self, __context: Any) -> None:
+        self.totalUsers = self.total_users
+        self.activeUsers = self.active_users
+        self.inactiveUsers = self.inactive_users
+        self.invitedUsers = self.invited_users
+        self.usersByRole = self.users_by_role
+

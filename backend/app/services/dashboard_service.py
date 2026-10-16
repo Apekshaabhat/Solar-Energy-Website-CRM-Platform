@@ -8,6 +8,7 @@ from app.models.site_survey import SiteSurvey
 from app.models.project import Project
 from app.models.customer import Customer
 from app.models.activity import Activity
+from app.models.user import User
 from app.schemas.dashboard import (
     DashboardSummaryResponse,
     StatCardItem,
@@ -16,6 +17,7 @@ from app.schemas.dashboard import (
     RecentLeadItem,
     RecentActivityItem,
 )
+
 
 SOURCE_COLORS = {
     "Website": "#24b368",
@@ -72,7 +74,7 @@ def calculate_change_str(current: int, previous: int) -> str:
 
 class DashboardService:
     @staticmethod
-    def get_summary(db: Session) -> DashboardSummaryResponse:
+    def get_summary(db: Session, current_user: Optional[User] = None) -> DashboardSummaryResponse:
         now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
         sixty_days_ago = now - timedelta(days=60)
@@ -241,6 +243,20 @@ class DashboardService:
             "estimatedPipelineValue": float(pipeline_value),
             "projectRevenue": float(completed_project_value),
         }
+
+        # User aggregations for Admin & Manager
+        if current_user and current_user.role in ["Admin", "Manager"]:
+            total_users = db.query(func.count(User.id)).scalar() or 0
+            active_users = db.query(func.count(User.id)).filter(User.status == "Active").scalar() or 0
+            inactive_users = db.query(func.count(User.id)).filter(User.status == "Inactive").scalar() or 0
+            invited_users = db.query(func.count(User.id)).filter(User.status == "Invited").scalar() or 0
+            roles_query = db.query(User.role, func.count(User.id)).group_by(User.role).all()
+            metrics["totalUsers"] = total_users
+            metrics["activeUsers"] = active_users
+            metrics["inactiveUsers"] = inactive_users
+            metrics["invitedUsers"] = invited_users
+            metrics["usersByRole"] = {r: cnt for r, cnt in roles_query}
+
 
         # 5. Leads by Source (real database counts)
         source_counts = (
