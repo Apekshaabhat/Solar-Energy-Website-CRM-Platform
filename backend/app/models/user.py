@@ -31,6 +31,12 @@ class User(Base):
     # Relationships
     leads = relationship("Lead", back_populates="assigned_user", foreign_keys="Lead.assigned_user_id")
     customers = relationship("Customer", back_populates="assigned_user", foreign_keys="Customer.assigned_user_id")
+    customer_profile = relationship(
+        "Customer",
+        back_populates="account_user",
+        foreign_keys="Customer.account_user_id",
+        uselist=False,
+    )
     projects = relationship("Project", back_populates="assigned_user", foreign_keys="Project.assigned_user_id")
     site_surveys = relationship("SiteSurvey", back_populates="assigned_user", foreign_keys="SiteSurvey.assigned_user_id")
     blogs = relationship("BlogPost", back_populates="author_user", foreign_keys="BlogPost.author_id")

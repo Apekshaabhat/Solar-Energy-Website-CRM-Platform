@@ -1,0 +1,476 @@
+[1mdiff --git a/backend/app/routers/customers.py b/backend/app/routers/customers.py[m
+[1mindex 0e55fc6..b90a2a6 100644[m
+[1m--- a/backend/app/routers/customers.py[m
+[1m+++ b/backend/app/routers/customers.py[m
+[36m@@ -1,8 +1,8 @@[m
+ import math[m
+[31m-from typing import Optional, List[m
+[32m+[m[32mfrom typing import Optional[m
+ from datetime import datetime, timezone[m
+ from fastapi import APIRouter, Depends, HTTPException, Query, status[m
+[31m-from sqlalchemy.orm import Session[m
+[32m+[m[32mfrom sqlalchemy.orm import Query as SQLAlchemyQuery, Session[m
+ from sqlalchemy import or_, desc, func[m
+ [m
+ from app.core.database import get_db[m
+[36m@@ -15,9 +15,21 @@[m [mfrom app.schemas.common import APIResponse, PaginatedResponse, PaginationMeta[m
+ [m
+ router = APIRouter(prefix="/customers", tags=["Customers Management"])[m
+ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"][m
+[32m+[m[32mCUSTOMER_MANAGER_ROLES = {"admin", "manager"}[m
+ NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}[m
+ [m
+ [m
+[32m+[m[32mdef is_customer_manager(user: User) -> bool:[m
+[32m+[m[32m    return user.role.lower() in CUSTOMER_MANAGER_ROLES[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef accessible_customers_query(db: Session, current_user: User) -> SQLAlchemyQuery[Customer]:[m
+[32m+[m[32m    query = db.query(Customer)[m
+[32m+[m[32m    if not is_customer_manager(current_user):[m
+[32m+[m[32m        query = query.filter(Customer.assigned_user_id == current_user.id)[m
+[32m+[m[32m    return query[m
+[32m+[m
+[32m+[m
+ def validate_user_reference(db: Session, user_id: Optional[int]) -> None:[m
+     if user_id is None:[m
+         return[m
+[36m@@ -51,7 +63,7 @@[m [mdef list_customers([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    query = db.query(Customer)[m
+[32m+[m[32m    query = accessible_customers_query(db, current_user)[m
+ [m
+     if search:[m
+         s = f"%{search.strip()}%"[m
+[36m@@ -109,7 +121,16 @@[m [mdef create_customer([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    validate_user_reference(db, request.assigned_user_id)[m
+[32m+[m[32m    if is_customer_manager(current_user):[m
+[32m+[m[32m        assigned_user_id = request.assigned_user_id[m
+[32m+[m[32m        validate_user_reference(db, assigned_user_id)[m
+[32m+[m[32m    else:[m
+[32m+[m[32m        if request.assigned_user_id not in (None, current_user.id):[m
+[32m+[m[32m            raise HTTPException([m
+[32m+[m[32m                status_code=status.HTTP_403_FORBIDDEN,[m
+[32m+[m[32m                detail="Only administrators and managers can assign customers to other users",[m
+[32m+[m[32m            )[m
+[32m+[m[32m        assigned_user_id = current_user.id[m
+ [m
+     customer = Customer([m
+         name=request.name.strip(),[m
+[36m@@ -120,7 +141,7 @@[m [mdef create_customer([m
+         property_type=request.property_type,[m
+         status=request.status or "Active",[m
+         customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),[m
+[31m-        assigned_user_id=request.assigned_user_id,[m
+[32m+[m[32m        assigned_user_id=assigned_user_id,[m
+     )[m
+     db.add(customer)[m
+     db.commit()[m
+[36m@@ -141,7 +162,7 @@[m [mdef get_customer([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    customer = db.query(Customer).filter(Customer.id == customer_id).first()[m
+[32m+[m[32m    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()[m
+     if not customer:[m
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")[m
+     resp = CustomerResponse.model_validate(customer)[m
+[36m@@ -160,11 +181,20 @@[m [mdef update_customer([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    customer = db.query(Customer).filter(Customer.id == customer_id).first()[m
+[32m+[m[32m    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()[m
+     if not customer:[m
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")[m
+ [m
+     update_data = request.model_dump(exclude_unset=True)[m
+[32m+[m[32m    if ([m
+[32m+[m[32m        "assigned_user_id" in update_data[m
+[32m+[m[32m        and not is_customer_manager(current_user)[m
+[32m+[m[32m        and update_data["assigned_user_id"] != current_user.id[m
+[32m+[m[32m    ):[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=status.HTTP_403_FORBIDDEN,[m
+[32m+[m[32m            detail="Only administrators and managers can change customer assignments",[m
+[32m+[m[32m        )[m
+     validate_user_reference(db, update_data.get("assigned_user_id"))[m
+     apply_customer_update(customer, update_data)[m
+ [m
+[1mdiff --git a/backend/app/routers/leads.py b/backend/app/routers/leads.py[m
+[1mindex 088e7f3..072dac9 100644[m
+[1m--- a/backend/app/routers/leads.py[m
+[1m+++ b/backend/app/routers/leads.py[m
+[36m@@ -1,7 +1,7 @@[m
+ import math[m
+ from typing import Optional, List[m
+ from fastapi import APIRouter, Depends, HTTPException, Query, status[m
+[31m-from sqlalchemy.orm import Session[m
+[32m+[m[32mfrom sqlalchemy.orm import Query as SQLAlchemyQuery, Session[m
+ from sqlalchemy import or_, desc, func[m
+ [m
+ from app.core.database import get_db[m
+[36m@@ -16,9 +16,14 @@[m [mrouter = APIRouter(prefix="/leads", tags=["Leads Management"])[m
+ [m
+ LEAD_STATUSES = ["New", "Contacted", "Site Survey", "Quoted", "Converted", "Lost"][m
+ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"][m
+[32m+[m[32mLEAD_MANAGER_ROLES = {"admin", "manager"}[m
+ NULLABLE_LEAD_FIELDS = {"email", "phone", "notes", "estimated_value", "assigned_user_id", "customer_id"}[m
+ [m
+ [m
+[32m+[m[32mdef is_lead_manager(user: User) -> bool:[m
+[32m+[m[32m    return user.role.lower() in LEAD_MANAGER_ROLES[m
+[32m+[m
+[32m+[m
+ def validate_user_reference(db: Session, user_id: Optional[int]) -> None:[m
+     if user_id is None:[m
+         return[m
+[36m@@ -45,6 +50,13 @@[m [mdef apply_lead_update(lead: Lead, update_data: dict) -> None:[m
+         setattr(lead, field, val)[m
+ [m
+ [m
+[32m+[m[32mdef accessible_leads_query(db: Session, current_user: User) -> SQLAlchemyQuery[Lead]:[m
+[32m+[m[32m    query = db.query(Lead)[m
+[32m+[m[32m    if not is_lead_manager(current_user):[m
+[32m+[m[32m        query = query.filter(Lead.assigned_user_id == current_user.id)[m
+[32m+[m[32m    return query[m
+[32m+[m
+[32m+[m
+ @router.get([m
+     "",[m
+     response_model=LeadListResponse,[m
+[36m@@ -61,7 +73,7 @@[m [mdef list_leads([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    query = db.query(Lead)[m
+[32m+[m[32m    query = accessible_leads_query(db, current_user)[m
+ [m
+     if search:[m
+         s = f"%{search.strip()}%"[m
+[36m@@ -131,8 +143,18 @@[m [mdef create_lead([m
+     db: Session = Depends(get_db),[m
+ ):[m
+     is_staff = is_staff_user(current_user)[m
+[32m+[m[32m    assigned_user_id = None[m
+     if is_staff:[m
+[31m-        validate_user_reference(db, request.assigned_user_id)[m
+[32m+[m[32m        if is_lead_manager(current_user):[m
+[32m+[m[32m            assigned_user_id = request.assigned_user_id[m
+[32m+[m[32m            validate_user_reference(db, assigned_user_id)[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            if request.assigned_user_id not in (None, current_user.id):[m
+[32m+[m[32m                raise HTTPException([m
+[32m+[m[32m                    status_code=status.HTTP_403_FORBIDDEN,[m
+[32m+[m[32m                    detail="Only administrators and managers can assign leads to other users",[m
+[32m+[m[32m                )[m
+[32m+[m[32m            assigned_user_id = current_user.id[m
+         validate_customer_reference(db, request.customer_id)[m
+ [m
+     lead = Lead([m
+[36m@@ -146,7 +168,7 @@[m [mdef create_lead([m
+         status=request.status or "New",[m
+         notes=request.notes,[m
+         estimated_value=request.estimated_value,[m
+[31m-        assigned_user_id=request.assigned_user_id if is_staff else None,[m
+[32m+[m[32m        assigned_user_id=assigned_user_id,[m
+         customer_id=request.customer_id if is_staff else None,[m
+     )[m
+     db.add(lead)[m
+[36m@@ -168,7 +190,7 @@[m [mdef get_lead([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    lead = db.query(Lead).filter(Lead.id == lead_id).first()[m
+[32m+[m[32m    lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()[m
+     if not lead:[m
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")[m
+     resp = LeadResponse.model_validate(lead)[m
+[36m@@ -187,11 +209,20 @@[m [mdef update_lead([m
+     current_user: User = Depends(require_roles(STAFF_ROLES)),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    lead = db.query(Lead).filter(Lead.id == lead_id).first()[m
+[32m+[m[32m    lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()[m
+     if not lead:[m
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")[m
+ [m
+     update_data = request.model_dump(exclude_unset=True)[m
+[32m+[m[32m    if ([m
+[32m+[m[32m        "assigned_user_id" in update_data[m
+[32m+[m[32m        and not is_lead_manager(current_user)[m
+[32m+[m[32m        and update_data["assigned_user_id"] != current_user.id[m
+[32m+[m[32m    ):[m
+[32m+[m[32m        raise HTTPException([m
+[32m+[m[32m            status_code=status.HTTP_403_FORBIDDEN,[m
+[32m+[m[32m            detail="Only administrators and managers can change lead assignments",[m
+[32m+[m[32m        )[m
+     validate_user_reference(db, update_data.get("assigned_user_id"))[m
+     validate_customer_reference(db, update_data.get("customer_id"))[m
+     apply_lead_update(lead, update_data)[m
+[36m@@ -214,7 +245,7 @@[m [mdef delete_lead([m
+     current_user: User = Depends(require_roles(["Admin", "Manager"])),[m
+     db: Session = Depends(get_db),[m
+ ):[m
+[31m-    lead = db.query(Lead).filter(Lead.id == lead_id).first()[m
+[32m+[m[32m    lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()[m
+     if not lead:[m
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")[m
+ [m
+[1mdiff --git a/backend/package-lock.json b/backend/package-lock.json[m
+[1mnew file mode 100644[m
+[1mindex 0000000..dfb18f1[m
+[1m--- /dev/null[m
+[1m+++ b/backend/package-lock.json[m
+[36m@@ -0,0 +1,6 @@[m
+[32m+[m[32m{[m
+[32m+[m[32m  "name": "backend",[m
+[32m+[m[32m  "lockfileVersion": 3,[m
+[32m+[m[32m  "requires": true,[m
+[32m+[m[32m  "packages": {}[m
+[32m+[m[32m}[m
+[1mdiff --git a/backend/tests/test_api.py b/backend/tests/test_api.py[m
+[1mindex 7ad3009..93a88cd 100644[m
+[1m--- a/backend/tests/test_api.py[m
+[1m+++ b/backend/tests/test_api.py[m
+[36m@@ -1,9 +1,21 @@[m
+ from datetime import timedelta[m
+ [m
+ from app.core.security import create_access_token[m
+[32m+[m[32mfrom app.core.database import SessionLocal[m
+[32m+[m[32mfrom app.models.customer import Customer[m
+[32m+[m[32mfrom app.models.lead import Lead[m
+[32m+[m[32mfrom app.models.user import User[m
+ from .conftest import auth_headers[m
+ [m
+ [m
+[32m+[m[32mdef staff_headers(client, email, role):[m
+[32m+[m[32m    headers = auth_headers(client, role=role, email=email)[m
+[32m+[m[32m    with SessionLocal() as db:[m
+[32m+[m[32m        db.query(User).filter(User.email == email).update({"role": role})[m
+[32m+[m[32m        db.commit()[m
+[32m+[m[32m    return headers[m
+[32m+[m
+[32m+[m
+ def test_seeded_admin_login_uses_dev_password(client):[m
+     response = client.post([m
+         "/api/v1/auth/login",[m
+[36m@@ -141,7 +153,7 @@[m [mdef test_public_lead_submission_and_staff_lead_management(client):[m
+     lead_payload = {[m
+         "name": "Rohan Patil",[m
+         "contact": "+91 98765 43210",[m
+[31m-        "email": "rohan@example.com",[m
+[32m+[m[32m        "email": "public-regression@solara.test",[m
+         "location": "Mumbai",[m
+         "property_type": "Residential",[m
+         "source": "Website",[m
+[36m@@ -154,7 +166,11 @@[m [mdef test_public_lead_submission_and_staff_lead_management(client):[m
+     assert blocked.status_code == 401[m
+ [m
+     headers = auth_headers(client)[m
+[31m-    listed = client.get("/api/v1/leads", headers=headers)[m
+[32m+[m[32m    listed = client.get([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        params={"search": "public-regression@solara.test"},[m
+[32m+[m[32m        headers=headers,[m
+[32m+[m[32m    )[m
+     assert listed.status_code == 200[m
+     assert listed.json()["total"] == 1[m
+ [m
+[36m@@ -168,6 +184,407 @@[m [mdef test_public_lead_submission_and_staff_lead_management(client):[m
+     assert updated.json()["data"]["status"] == "Contacted"[m
+ [m
+ [m
+[32m+[m[32mdef test_lead_access_is_scoped_to_assigned_staff_and_preserves_manager_access(client):[m
+[32m+[m[32m    admin_headers = auth_headers(client, email="lead-admin@solara.test")[m
+[32m+[m[32m    sales_headers = staff_headers(client, "sales-one@solara.test", "Sales Rep")[m
+[32m+[m[32m    other_sales_headers = staff_headers(client, "sales-two@solara.test", "Sales Rep")[m
+[32m+[m[32m    manager_headers = staff_headers(client, "lead-manager@solara.test", "Manager")[m
+[32m+[m[32m    initial_admin_total = client.get("/api/v1/leads", headers=admin_headers).json()["total"][m
+[32m+[m
+[32m+[m[32m    def create_lead(name, email, status, assigned_user_id=None):[m
+[32m+[m[32m        response = client.post([m
+[32m+[m[32m            "/api/v1/leads",[m
+[32m+[m[32m            json={[m
+[32m+[m[32m                "name": name,[m
+[32m+[m[32m                "contact": "+91 90000 00000",[m
+[32m+[m[32m                "email": email,[m
+[32m+[m[32m                "location": "Pune",[m
+[32m+[m[32m                "property_type": "Residential",[m
+[32m+[m[32m                "source": "Website",[m
+[32m+[m[32m                "status": status,[m
+[32m+[m[32m                "assigned_user_id": assigned_user_id,[m
+[32m+[m[32m            },[m
+[32m+[m[32m            headers=admin_headers,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        assert response.status_code == 201[m
+[32m+[m[32m        return response.json()["data"]["id"][m
+[32m+[m
+[32m+[m[32m    db = SessionLocal()[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        sales_user_id = db.query(User.id).filter(User.email == "sales-one@solara.test").scalar()[m
+[32m+[m[32m        other_sales_user_id = db.query(User.id).filter(User.email == "sales-two@solara.test").scalar()[m
+[32m+[m[32m    finally:[m
+[32m+[m[32m        db.close()[m
+[32m+[m
+[32m+[m[32m    own_lead_id = create_lead("Own Lead", "own@solara.test", "New", sales_user_id)[m
+[32m+[m[32m    own_followup_id = create_lead([m
+[32m+[m[32m        "Own Follow-up", "followup@solara.test", "Contacted", sales_user_id[m
+[32m+[m[32m    )[m
+[32m+[m[32m    other_lead_id = create_lead("Other Rep Lead", "other@solara.test", "Lost", other_sales_user_id)[m
+[32m+[m[32m    create_lead("Unassigned Lead", "unassigned@solara.test", "New")[m
+[32m+[m
+[32m+[m[32m    own_leads = client.get("/api/v1/leads", headers=sales_headers)[m
+[32m+[m[32m    assert own_leads.status_code == 200[m
+[32m+[m[32m    assert own_leads.json()["total"] == 2[m
+[32m+[m[32m    assert {lead["id"] for lead in own_leads.json()["items"]} == {own_lead_id, own_followup_id}[m
+[32m+[m[32m    assert other_lead_id not in {lead["id"] for lead in own_leads.json()["items"]}[m
+[32m+[m[32m    assert own_leads.json()["tab_counts"]["All Leads"] == 2[m
+[32m+[m[32m    assert own_leads.json()["tab_counts"]["New"] == 1[m
+[32m+[m[32m    assert own_leads.json()["tab_counts"]["Contacted"] == 1[m
+[32m+[m[32m    assert own_leads.json()["tab_counts"]["Lost"] == 0[m
+[32m+[m
+[32m+[m[32m    hidden_search = client.get([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        params={"search": "Other Rep Lead", "status": "Lost"},[m
+[32m+[m[32m        headers=sales_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert hidden_search.status_code == 200[m
+[32m+[m[32m    assert hidden_search.json()["total"] == 0[m
+[32m+[m[32m    assert hidden_search.json()["tab_counts"]["All Leads"] == 0[m
+[32m+[m
+[32m+[m[32m    hidden_status = client.get([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        params={"status": "Lost"},[m
+[32m+[m[32m        headers=sales_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert hidden_status.status_code == 200[m
+[32m+[m[32m    assert hidden_status.json()["total"] == 0[m
+[32m+[m[32m    assert hidden_status.json()["tab_counts"]["All Leads"] == 2[m
+[32m+[m[32m    assert hidden_status.json()["tab_counts"]["Lost"] == 0[m
+[32m+[m
+[32m+[m[32m    second_page = client.get([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        params={"page": 2, "limit": 1},[m
+[32m+[m[32m        headers=sales_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert second_page.status_code == 200[m
+[32m+[m[32m    assert second_page.json()["total"] == 2[m
+[32m+[m[32m    assert len(second_page.json()["items"]) == 1[m
+[32m+[m[32m    assert second_page.json()["items"][0]["id"] != other_lead_id[m
+[32m+[m
+[32m+[m[32m    assert client.get(f"/api/v1/leads/{other_lead_id}", headers=sales_headers).status_code == 404[m
+[32m+[m[32m    assert client.patch([m
+[32m+[m[32m        f"/api/v1/leads/{other_lead_id}",[m
+[32m+[m[32m        json={"status": "Contacted"},[m
+[32m+[m[32m        headers=sales_headers,[m
+[32m+[m[32m    ).status_code == 404[m
+[32m+[m
+[32m+[m[32m    admin_leads = client.get("/api/v1/leads", headers=admin_headers)[m
+[32m+[m[32m    manager_leads = client.get("/api/v1/leads", headers=manager_headers)[m
+[32m+[m[32m    assert admin_leads.status_code == 200[m
+[32m+[m[32m    assert manager_leads.status_code == 200[m
+[32m+[m[32m    assert admin_leads.json()["total"] == initial_admin_total + 4[m
+[32m+[m[32m    assert manager_leads.json()["total"] == initial_admin_total + 4[m
+[32m+[m[32m    assert client.get(f"/api/v1/leads/{other_lead_id}", headers=manager_headers).status_code == 200[m
+[32m+[m[32m    assert {lead["id"] for lead in client.get([m
+[32m+[m[32m        "/api/v1/leads", headers=other_sales_headers[m
+[32m+[m[32m    ).json()["items"]} == {other_lead_id}[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef test_lead_record_routes_enforce_auth_ownership_and_assignment_permissions(client):[m
+[32m+[m[32m    admin_headers = auth_headers(client, email="record-admin@solara.test")[m
+[32m+[m[32m    owner_headers = staff_headers(client, "record-owner@solara.test", "Sales Rep")[m
+[32m+[m[32m    other_headers = staff_headers(client, "record-other@solara.test", "Support")[m
+[32m+[m[32m    manager_headers = staff_headers(client, "record-manager@solara.test", "Manager")[m
+[32m+[m
+[32m+[m[32m    with SessionLocal() as db:[m
+[32m+[m[32m        owner_id = db.query(User.id).filter(User.email == "record-owner@solara.test").scalar()[m
+[32m+[m[32m        other_id = db.query(User.id).filter(User.email == "record-other@solara.test").scalar()[m
+[32m+[m
+[32m+[m[32m    lead_payload = {[m
+[32m+[m[32m        "name": "Record Authorization Lead",[m
+[32m+[m[32m        "contact": "+91 91111 22222",[m
+[32m+[m[32m        "email": "record-authorization@solara.test",[m
+[32m+[m[32m        "location": "Pune",[m
+[32m+[m[32m        "property_type": "Residential",[m
+[32m+[m[32m        "source": "Website",[m
+[32m+[m[32m    }[m
+[32m+[m
+[32m+[m[32m    own_created = client.post("/api/v1/leads", json=lead_payload, headers=owner_headers)[m
+[32m+[m[32m    assert own_created.status_code == 201[m
+[32m+[m[32m    own_lead_id = own_created.json()["data"]["id"][m
+[32m+[m[32m    assert own_created.json()["data"]["assigned_user_id"] == owner_id[m
+[32m+[m[32m    assert client.get(f"/api/v1/leads/{own_lead_id}", headers=other_headers).status_code == 404[m
+[32m+[m[32m    assert client.patch([m
+[32m+[m[32m        f"/api/v1/leads/{own_lead_id}",[m
+[32m+[m[32m        json={"status": "Lost"},[m
+[32m+[m[32m        headers=other_headers,[m
+[32m+[m[32m    ).status_code == 404[m
+[32m+[m
+[32m+[m[32m    forged_assignment = client.post([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        json={**lead_payload, "email": "forged-assignment@solara.test", "assigned_user_id": other_id},[m
+[32m+[m[32m        headers=owner_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert forged_assignment.status_code == 403[m
+[32m+[m
+[32m+[m[32m    other_lead = client.post([m
+[32m+[m[32m        "/api/v1/leads",[m
+[32m+[m[32m        json={**lead_payload, "email": "manager-assigned@solara.test", "assigned_user_id": other_id},[m
+[32m+[m[32m        headers=admin_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert other_lead.status_code == 201[m
+[32m+[m[32m    other_lead_id = other_lead.json()["data"]["id"][m
+[32m+[m
+[32m+[m[32m    for method, path, kwargs in [[m
+[32m+[m[32m        ("get", f"/api/v1/leads/{other_lead_id}", {}),[m
+[32m+[m[32m        ("patch", f"/api/v1/leads/{other_lead_id}", {"json": {"status": "Lost"}}),[m
+[32m+[m[32m        ("delete", f"/api/v1/leads/{other_lead_id}", {}),[m
+[32m+[m[32m    ]:[m
+[32m+[m[32m        assert getattr(client, method)(path, **kwargs).status_code == 401[m
+[32m+[m[32m        assert getattr(client, method)([m
+[32m+[m[32m            path,[m
+[32m+[m[32m            headers={"Authorization": "Bearer invalid-token"},[m
+[32m+[m[32m            **kwargs,[m
+[32m+[m[32m        ).status_code == 401[m
+[32m+[m
+[32m+[m[32m    assert client.get(f"/api/v1/leads/{other_lead_id}", headers=owner_headers).status_code == 404[m
+[32m+[m[32m    denied_update = client.patch([m
+[32m+[m[32m        f"/api/v1/leads/{own_lead_id}",[m
+[32m+[m[32m        json={"assigned_user_id": other_id},[m
+[32m+[m[32m        headers=owner_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert denied_update.status_code == 403[m
+[32m+[m
+[32m+[m[32m    with SessionLocal() as db:[m
+[32m+[m[32m        still_owned = db.query(Lead).filter(Lead.id == own_lead_id).one()[m
+[32m+[m[32m        assert still_owned.assigned_user_id == owner_id[m
+[32m+[m
+[32m+[m[32m    assert client.get("/api/v1/leads/not-an-id", headers=owner_headers).status_code == 422[m
+[32m+[m[32m    assert client.patch([m
+[32m+[m[32m        "/api/v1/leads/not-an-id",[m
+[32m+[m[32m        json={"status": "Lost"},[m
+[32m+[m[32m        headers=owner_headers,[m
+[32m+[m[32m    ).status_code == 422[m
+[32m+[m[32m    assert client.get("/api/v1/leads/999999", headers=owner_headers).status_code == 404[m
+[32m+[m[32m    assert client.patch([m
+[32m+[m[32m        "/api/v1/leads/999999",[m
+[32m+[m[32m        json={"status": "Lost"},[m
+[32m+[m[32m        headers=owner_headers,[m
+[32m+[m[32m    ).status_code == 404[m
+[32m+[m[32m    assert client.delete("/api/v1/leads/999999", headers=admin_headers).status_code == 404[m
+[32m+[m
+[32m+[m[32m    reassign = client.patch([m
+[32m+[m[32m        f"/api/v1/leads/{other_lead_id}",[m
+[32m+[m[32m        json={"assigned_user_id": owner_id},[m
+[32m+[m[32m        headers=manager_headers,[m
+[32m+[m[32m    )[m
+[32m+[m[32m    assert reassign.status_code == 200[m
+[32m+[m[32m    assert reassign.json()["data"]["assigned_user_id"] == owner_id[m
+[32m+[m[32m    assert client.get(f"/api/v1/leads/{other_lead_id}"

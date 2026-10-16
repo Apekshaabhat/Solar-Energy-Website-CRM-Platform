@@ -58,6 +58,7 @@ class CustomerBase(BaseModel):
 
 class CustomerCreate(CustomerBase):
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
+    account_user_id: Optional[int] = Field(default=None, ge=1)
 
 
 class CustomerUpdate(BaseModel):
@@ -70,6 +71,7 @@ class CustomerUpdate(BaseModel):
     status: Optional[str] = None
     customer_since: Optional[str] = Field(default=None, max_length=30)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
+    account_user_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("name", "contact", "location", mode="after")
     @classmethod
@@ -100,9 +102,41 @@ class CustomerUpdate(BaseModel):
         return validate_choice(value, CUSTOMER_STATUSES, "status")
 
 
+class CustomerProfileUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    contact: Optional[str] = Field(default=None, min_length=3, max_length=100)
+    phone: Optional[str] = Field(default=None, max_length=30)
+    location: Optional[str] = Field(default=None, min_length=2, max_length=150)
+    property_type: Optional[str] = None
+
+    @field_validator("name", "contact", "location", mode="after")
+    @classmethod
+    def strip_profile_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Field cannot be blank")
+        return cleaned
+
+    @field_validator("phone", mode="after")
+    @classmethod
+    def strip_profile_optional_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        cleaned = value.strip()
+        return cleaned or None
+
+    @field_validator("property_type", mode="after")
+    @classmethod
+    def validate_profile_property_type(cls, value: Optional[str]) -> Optional[str]:
+        return validate_choice(value, PROPERTY_TYPES, "property_type")
+
+
 class CustomerResponse(CustomerBase):
     id: int
     assigned_user_id: Optional[int] = None
+    account_user_id: Optional[int] = None
     total_projects: int = 0
     created_at: datetime
     updated_at: datetime
