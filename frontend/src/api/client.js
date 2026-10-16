@@ -1,35 +1,59 @@
-const BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
+export const BASE_URL =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:8000/api/v1";
 
-const TOKEN_KEY = "solara_token";
-const USER_KEY = "solara_user";
-const REMEMBER_KEY = "solara_remember";
+export const TOKEN_KEY = "solara_token";
+export const ALT_TOKEN_KEY = "solara-auth-token";
+export const USER_KEY = "solara_user";
+export const ALT_USER_KEY = "solara-auth-user";
+export const REMEMBER_KEY = "solara_remember";
 
 let isRedirectingToLogin = false;
 
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY);
+  if (typeof window === "undefined") return null;
+  return (
+    localStorage.getItem(TOKEN_KEY) ||
+    sessionStorage.getItem(TOKEN_KEY) ||
+    localStorage.getItem(ALT_TOKEN_KEY) ||
+    sessionStorage.getItem(ALT_TOKEN_KEY) ||
+    null
+  );
 }
 
 export function setToken(token, rememberMe = false) {
+  if (typeof window === "undefined") return;
   if (token) {
     if (rememberMe) {
       localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(ALT_TOKEN_KEY, token);
       localStorage.setItem(REMEMBER_KEY, "true");
       sessionStorage.removeItem(TOKEN_KEY);
+      sessionStorage.removeItem(ALT_TOKEN_KEY);
     } else {
       sessionStorage.setItem(TOKEN_KEY, token);
+      sessionStorage.setItem(ALT_TOKEN_KEY, token);
       localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(ALT_TOKEN_KEY);
       localStorage.removeItem(REMEMBER_KEY);
     }
   } else {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(ALT_TOKEN_KEY);
     localStorage.removeItem(REMEMBER_KEY);
     sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(ALT_TOKEN_KEY);
   }
 }
 
 export function getStoredUser() {
-  const user = localStorage.getItem(USER_KEY) || sessionStorage.getItem(USER_KEY);
+  if (typeof window === "undefined") return null;
+  const user =
+    localStorage.getItem(USER_KEY) ||
+    sessionStorage.getItem(USER_KEY) ||
+    localStorage.getItem(ALT_USER_KEY) ||
+    sessionStorage.getItem(ALT_USER_KEY);
   try {
     return user ? JSON.parse(user) : null;
   } catch (e) {
@@ -38,27 +62,40 @@ export function getStoredUser() {
 }
 
 export function setStoredUser(user) {
+  if (typeof window === "undefined") return;
   if (user) {
     const isRemembered = localStorage.getItem(REMEMBER_KEY) === "true";
+    const serialized = JSON.stringify(user);
     if (isRemembered) {
-      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      localStorage.setItem(USER_KEY, serialized);
+      localStorage.setItem(ALT_USER_KEY, serialized);
       sessionStorage.removeItem(USER_KEY);
+      sessionStorage.removeItem(ALT_USER_KEY);
     } else {
-      sessionStorage.setItem(USER_KEY, JSON.stringify(user));
+      sessionStorage.setItem(USER_KEY, serialized);
+      sessionStorage.setItem(ALT_USER_KEY, serialized);
       localStorage.removeItem(USER_KEY);
+      localStorage.removeItem(ALT_USER_KEY);
     }
   } else {
     localStorage.removeItem(USER_KEY);
+    localStorage.removeItem(ALT_USER_KEY);
     sessionStorage.removeItem(USER_KEY);
+    sessionStorage.removeItem(ALT_USER_KEY);
   }
 }
 
 export function clearAuth() {
+  if (typeof window === "undefined") return;
   localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(ALT_TOKEN_KEY);
   localStorage.removeItem(REMEMBER_KEY);
   localStorage.removeItem(USER_KEY);
+  localStorage.removeItem(ALT_USER_KEY);
   sessionStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(ALT_TOKEN_KEY);
   sessionStorage.removeItem(USER_KEY);
+  sessionStorage.removeItem(ALT_USER_KEY);
   window.dispatchEvent(new Event("solara_auth_logout"));
 }
 

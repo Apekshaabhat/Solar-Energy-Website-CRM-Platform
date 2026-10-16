@@ -43,30 +43,16 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
     from app.services.auth_service import AuthService
 
     with SessionLocal() as db:
-        AuthService.bootstrap_admin(
-            db=db,
-            name="Solara Test User",
-            email=email,
-            password="StrongPass123",
-            role=role,
-            phone="+91 98765 43210",
-        )
-    """Provision an active user with required role directly in DB, then login."""
-    with Session(engine) as db:
         user = db.query(User).filter(User.email == email.lower()).first()
         if not user:
-            user = User(
-                name="Solara Admin",
-                email=email.lower(),
-                password_hash=get_password_hash("StrongPass123"),
-                phone="+91 98765 43210",
+            AuthService.bootstrap_admin(
+                db=db,
+                name="Solara Test User",
+                email=email,
+                password="StrongPass123",
                 role=role,
-                status="Active",
-                failed_attempts=0,
-                token_version=0,
+                phone="+91 98765 43210",
             )
-            db.add(user)
-            db.commit()
         else:
             user.status = "Active"
             user.role = role
@@ -75,13 +61,6 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
             user.locked_until = None
             db.commit()
 
-    db = SessionLocal()
-    try:
-        db.query(User).filter(User.email == email).update({"role": "Admin"})
-        db.commit()
-    finally:
-        db.close()
-
     login_response = client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": "StrongPass123"},
@@ -89,4 +68,5 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
     assert login_response.status_code == 200
     token = login_response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+
 

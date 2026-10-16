@@ -53,9 +53,15 @@ def get_current_user(
         if is_revoked:
             raise credentials_exception
 
-    # Load fresh user from database on every request
     user = db.query(User).filter(User.id == user_id).first()
-    if user is None or user.status != "Active":
+    if user is None:
+        raise credentials_exception
+    if user.status != "Active":
+        if user.status == "Inactive":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is deactivated or inactive.",
+            )
         raise credentials_exception
 
     # Reject token if token_version doesn't match current user token_version

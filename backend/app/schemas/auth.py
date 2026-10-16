@@ -35,7 +35,7 @@ class RegisterRequest(BaseModel):
 class ActivateAccountRequest(BaseModel):
     token: str = Field(..., min_length=16, description="Invitation or activation token")
     password: str = Field(..., min_length=6, max_length=128)
-    confirm_password: str = Field(..., min_length=6, max_length=128)
+    confirm_password: Optional[str] = Field(None, min_length=6, max_length=128)
 
 
 class ForgotPasswordRequest(BaseModel):

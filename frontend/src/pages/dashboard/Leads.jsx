@@ -8,10 +8,19 @@ import StatusBadge from "../../components/dashboard/StatusBadge";
 import Pagination from "../../components/dashboard/Pagination";
 import Modal from "../../components/dashboard/Modal";
 import { FormField, TextInput, SelectInput } from "../../components/dashboard/FormField";
-import { leadsTabOrder } from "../../data/dashboardData";
 import { leadsApi } from "../../api/leads";
 import { useDashboardData } from "../../context/DashboardDataContext";
 import { todayISO } from "../../utils/dashboardDate";
+
+const leadsTabOrder = [
+  "All Leads",
+  "New",
+  "Contacted",
+  "Site Survey",
+  "Quoted",
+  "Converted",
+  "Lost",
+];
 
 const tabFilterMap = {
   "All Leads": null,

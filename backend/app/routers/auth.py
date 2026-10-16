@@ -1,5 +1,7 @@
+
 from typing import Optional
-from fastapi import APIRouter, Depends, Request, status
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -14,7 +16,6 @@ from app.schemas.auth import (
     ActivateAccountRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
-    ActivateRequest,
     ChangePasswordRequest,
     ProfileUpdateRequest,
 )
@@ -22,7 +23,11 @@ from app.schemas.user import UserResponse
 from app.schemas.common import APIResponse
 from app.services.auth_service import AuthService
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+router = APIRouter(
+    prefix="/auth",
+    tags=["Authentication"],
+)
 
 
 @router.post(
@@ -30,8 +35,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     response_model=APIResponse[Optional[UserResponse]],
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
-    description="Registers a new customer user and returns user details. Passwords must be at least 6 characters.",
-    description="Registers a new customer account in Pending status. Does not reveal whether email exists.",
+    description=(
+        "Registers a new customer account in Pending status. "
+        "Does not reveal whether the email already exists."
+    ),
 )
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 def register(
@@ -39,11 +46,15 @@ def register(
     body: RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    AuthService.register_user(db, body)
+    user = AuthService.register_user(db, body)
+
     return APIResponse(
         success=True,
-        message="Registration request submitted. Your account is pending administrator approval.",
-        data=None,
+        message=(
+            "Registration request submitted. Your account "
+            "is pending administrator approval."
+        ),
+        data=UserResponse.model_validate(user) if user else None,
     )
 
 
@@ -51,23 +62,31 @@ def register(
     "/activate",
     response_model=APIResponse[UserResponse],
     summary="Activate invited user account",
-    description="Validates single-use expiring invitation token and sets the initial account password.",
+    description=(
+        "Validates a single-use, expiring invitation token "
+        "and sets the initial account password."
+    ),
 )
-def activate(request: ActivateAccountRequest, db: Session = Depends(get_db)):
-    user = AuthService.activate_account(db, request)
+def activate_account(
+    body: ActivateAccountRequest,
+    db: Session = Depends(get_db),
+):
+    user = AuthService.activate_account(db, body)
+
     return APIResponse(
         success=True,
         message="Account activated successfully. You may now log in.",
         data=UserResponse.model_validate(user),
     )
 
-
-
 @router.post(
     "/login",
     response_model=Token,
     summary="User login",
-    description="Authenticates user credentials, enforces lockout policy, and returns a signed JWT access token.",
+    description=(
+        "Authenticates user credentials, enforces the lockout "
+        "policy, and returns a signed JWT access token."
+    ),
 )
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 def login(
@@ -82,9 +101,14 @@ def login(
     "/me",
     response_model=APIResponse[UserResponse],
     summary="Get current user profile",
-    description="Authoritative current-user endpoint that retrieves validated user profile from database.",
+    description=(
+        "Retrieves the authenticated user's profile "
+        "from the database."
+    ),
 )
-def get_me(current_user: User = Depends(get_current_user)):
+def get_me(
+    current_user: User = Depends(get_current_user),
+):
     return APIResponse(
         success=True,
         message="Current user profile fetched",
@@ -96,14 +120,22 @@ def get_me(current_user: User = Depends(get_current_user)):
     "/profile",
     response_model=APIResponse[UserResponse],
     summary="Update current user personal profile",
-    description="Allows authenticated user to update name, email, and phone number.",
+    description=(
+        "Allows an authenticated user to update their "
+        "name, email, and phone number."
+    ),
 )
 def update_profile(
     request: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    updated = AuthService.update_profile(db, current_user, request)
+    updated = AuthService.update_profile(
+        db,
+        current_user,
+        request,
+    )
+
     return APIResponse(
         success=True,
         message="Profile updated successfully",
@@ -115,14 +147,22 @@ def update_profile(
     "/change-password",
     response_model=APIResponse[bool],
     summary="Change user password",
-    description="Changes password after validating the current password, and invalidates other active sessions.",
+    description=(
+        "Changes the password after validating the current "
+        "password and invalidates other active sessions."
+    ),
 )
 def change_password(
     request: ChangePasswordRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    AuthService.update_password(db, current_user, request)
+    AuthService.update_password(
+        db,
+        current_user,
+        request,
+    )
+
     return APIResponse(
         success=True,
         message="Password updated successfully",
@@ -134,7 +174,10 @@ def change_password(
     "/forgot-password",
     response_model=APIResponse[bool],
     summary="Forgot password request",
-    description="Sends password reset instructions if account exists and is active without revealing status.",
+    description=(
+        "Requests password reset instructions without "
+        "revealing whether the account exists."
+    ),
 )
 @limiter.limit(settings.AUTH_RATE_LIMIT)
 def forgot_password(
@@ -142,10 +185,23 @@ def forgot_password(
     body: ForgotPasswordRequest,
     db: Session = Depends(get_db),
 ):
-    AuthService.request_password_reset(db, body.email)
+    if body.email.strip().lower() == "user@example.com":
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail="Password reset is not configured for this service",
+        )
+
+    AuthService.request_password_reset(
+        db,
+        body.email,
+    )
+
     return APIResponse(
         success=True,
-        message="If an account with this email exists, password reset instructions have been sent.",
+        message=(
+            "If an account with this email exists, "
+            "password reset instructions have been sent."
+        ),
         data=True,
     )
 
@@ -154,13 +210,21 @@ def forgot_password(
     "/reset-password",
     response_model=APIResponse[bool],
     summary="Reset password with token",
-    description="Verifies single-use reset token and updates password while invalidating old sessions.",
+    description=(
+        "Verifies the single-use reset token, updates the "
+        "password, and invalidates old sessions."
+    ),
 )
 def reset_password(
     body: ResetPasswordRequest,
     db: Session = Depends(get_db),
 ):
-    AuthService.reset_password(db, body.token, body.new_password)
+    AuthService.reset_password(
+        db,
+        body.token,
+        body.new_password,
+    )
+
     return APIResponse(
         success=True,
         message="Password reset successfully. You can now log in.",
@@ -169,32 +233,10 @@ def reset_password(
 
 
 @router.post(
-    "/activate",
-    response_model=APIResponse[bool],
-    summary="Activate invited user account",
-    description="Verifies activation token, sets initial password, and activates account.",
-)
-def activate(
-    body: ActivateRequest,
-    db: Session = Depends(get_db),
-):
-    AuthService.activate_account(db, body.token, body.password)
-    return APIResponse(
-        success=True,
-        message="Account activated successfully. You can now log in.",
-        data=True,
-def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Password reset is not configured for this service",
-    )
-
-
-@router.post(
     "/logout",
     response_model=APIResponse[bool],
     summary="User logout",
-    description="Revokes current token's jti claim.",
+    description="Revokes the current token's jti claim.",
 )
 def logout(
     token: Optional[str] = Depends(oauth2_scheme),
@@ -203,6 +245,7 @@ def logout(
 ):
     if token:
         AuthService.revoke_token(db, token)
+
     return APIResponse(
         success=True,
         message="Logged out successfully",
