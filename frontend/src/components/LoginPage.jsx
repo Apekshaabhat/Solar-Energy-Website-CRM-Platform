@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import AuthShell from './AuthShell';
 import { FormField } from './FormField';
-import { useAuth } from '../context/AuthContext';
+import { useAuth, getDefaultRouteForRole } from '../context/AuthContext';
 
 export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', border: '#D8DED9', text: '#16231C', textMuted: '#4B584F', green: '#1F5C3E', greenHover: '#184A32', input: '#FFFFFF' } }) {
   const navigate = useNavigate();
@@ -15,10 +15,20 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
   const [rememberMe, setRememberMe] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState(() => location.state?.message || '');
+
+  useEffect(() => {
+    const expiredMsg = sessionStorage.getItem("auth_redirect_message");
+    if (expiredMsg) {
+      sessionStorage.removeItem("auth_redirect_message");
+      setError(expiredMsg);
+    }
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
     setIsSubmitting(true);
 
     try {
@@ -28,8 +38,17 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
       }
       const redirectPath = location.state?.from?.pathname || '/dashboard';
       navigate(redirectPath, { replace: true });
+      const loggedUser = await login(email, password, rememberMe);
+      const targetRoute = getDefaultRouteForRole(loggedUser?.role);
+      navigate(targetRoute);
     } catch (err) {
-      setError(err.message || 'Unable to log in. Please check your details and try again.');
+      if (err.status === 401 || err.status === 422) {
+        setError('Invalid email or password');
+      } else if (err.status === 429) {
+        setError('Too many attempts, please try again later');
+      } else {
+        setError('Something went wrong, please try again');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -58,6 +77,11 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
       theme={theme}
     >
       <form onSubmit={handleSubmit} className="space-y-5">
+        {successMessage && (
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+            {successMessage}
+          </div>
+        )}
         {error && (
           <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
@@ -111,10 +135,14 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full inline-flex items-center justify-center gap-2.5 font-medium text-base px-6 py-3.5 rounded-full text-white transition-all duration-200 mt-2 focus:outline-none"
+          className="w-full inline-flex items-center justify-center gap-2.5 font-medium text-base px-6 py-3.5 rounded-full text-white transition-all duration-200 mt-2 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: theme.green }}
-          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = theme.greenHover)}
-          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = theme.green)}
+          onMouseEnter={(e) => {
+            if (!isSubmitting) e.currentTarget.style.backgroundColor = theme.greenHover;
+          }}
+          onMouseLeave={(e) => {
+            if (!isSubmitting) e.currentTarget.style.backgroundColor = theme.green;
+          }}
         >
           <span>{isSubmitting ? 'Logging in...' : 'Log In'}</span>
           <ArrowRight className="w-5 h-5" />

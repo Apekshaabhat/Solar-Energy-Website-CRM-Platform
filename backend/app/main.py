@@ -1,14 +1,25 @@
 import logging
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, status
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from slowapi.errors import RateLimitExceeded
 
 from app.core.config import settings
 from app.core.database import engine, Base
+from app.core.limiter import limiter
+from app.models.token import RevokedToken, PasswordResetToken
+from sqlalchemy import text
+
+from app.core.config import settings
+from app.core.database import SessionLocal, engine
+from app.models.user import User
 import app.models  # ensure models are registered
 from app.routers import (
     auth_router,
@@ -35,13 +46,35 @@ logger = logging.getLogger("solara_api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: ensure tables exist
-    logger.info("Initializing SOLARA API database tables...")
+    logger.info("Checking SOLARA API database connection...")
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
+    logger.info("Database connection established.")
+
+    db = SessionLocal()
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully.")
     except Exception as e:
         logger.error(f"Error initializing database: {e}")
+
+    # Cleanup of expired tokens at startup
+    try:
+        with Session(engine) as db:
+            now = datetime.now(timezone.utc)
+            db.query(RevokedToken).filter(RevokedToken.expires_at < now).delete()
+            db.query(PasswordResetToken).filter(PasswordResetToken.expires_at < now).delete()
+            db.commit()
+            logger.info("Cleaned up expired rows in revoked_tokens and password_reset_tokens.")
+    except Exception as e:
+        logger.warning(f"Error cleaning up expired tokens at startup: {e}")
+        if db.query(User).count() == 0:
+            logger.info("No users found. Running default seed data for local development.")
+            from seed import seed_data
+            seed_data()
+    finally:
+        db.close()
+
     yield
     # Shutdown
     logger.info("SOLARA API shutting down...")
@@ -57,6 +90,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Attach slowapi state
+app.state.limiter = limiter
+
+# Security Headers Middleware
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    if request.url.path.startswith(("/docs", "/redoc")):
+        # Relaxed policy so Swagger UI / ReDoc can load their assets
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none'"
+        )
+    else:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+        )
+    return response
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -65,6 +124,19 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        content={
+            "success": False,
+            "message": f"Rate limit exceeded: {exc.detail}",
+            "error_code": "HTTP_429",
+            "details": None,
+        },
+    )
 
 
 # Centralized Exception Handlers
@@ -95,7 +167,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
             "success": False,
             "message": "Input validation error: " + "; ".join(errors),
             "error_code": "VALIDATION_ERROR",
-            "details": exc.errors(),
+            "details": jsonable_encoder(exc.errors()),
         },
     )
 
@@ -155,6 +227,8 @@ def root():
 
 @app.get("/health", tags=["System"])
 def health_check():
+    with engine.connect() as connection:
+        connection.execute(text("SELECT 1"))
     return {"status": "healthy", "version": settings.VERSION}
 
 

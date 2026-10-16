@@ -2,7 +2,7 @@ import math
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
 
 from app.core.database import get_db
@@ -29,6 +29,22 @@ NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_i
 
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
+CUSTOMER_MANAGER_ROLES = {"admin", "manager"}
+NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}
+
+
+def is_customer_manager(user: User) -> bool:
+    return user.role.lower() in CUSTOMER_MANAGER_ROLES
+
+
+def accessible_customers_query(db: Session, current_user: User) -> SQLAlchemyQuery[Customer]:
+    query = db.query(Customer)
+    if not is_customer_manager(current_user):
+        query = query.filter(Customer.assigned_user_id == current_user.id)
+    return query
+
+
+def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
     if user_id is None:
         return None
     target_user = db.query(User).filter(User.id == user_id).first()
@@ -86,7 +102,7 @@ def list_customers(
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Customer)
+    query = accessible_customers_query(db, current_user)
 
     # Scoping
     if current_user.role in ["Sales Rep", "Support"]:
@@ -152,7 +168,16 @@ def create_customer(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    validate_user_reference(db, request.assigned_user_id)
+    if is_customer_manager(current_user):
+        assigned_user_id = request.assigned_user_id
+        validate_user_reference(db, assigned_user_id)
+    else:
+        if request.assigned_user_id not in (None, current_user.id):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can assign customers to other users",
+            )
+        assigned_user_id = current_user.id
 
     customer = Customer(
         name=request.name.strip(),
@@ -162,8 +187,8 @@ def create_customer(
         location=request.location.strip(),
         property_type=request.property_type,
         status=request.status or "Active",
-        customer_since=request.customer_since or datetime.utcnow().strftime("%d %b %Y"),
-        assigned_user_id=request.assigned_user_id,
+        customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),
+        assigned_user_id=assigned_user_id,
     )
     db.add(customer)
     db.flush()
@@ -312,7 +337,7 @@ def get_customer(
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user)
@@ -333,7 +358,7 @@ def update_customer(
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user)

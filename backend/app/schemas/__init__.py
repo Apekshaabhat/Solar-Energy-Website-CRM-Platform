@@ -1,5 +1,15 @@
 from app.schemas.common import APIResponse, APIErrorResponse, PaginationMeta, PaginatedResponse
-from app.schemas.auth import Token, TokenPayload, LoginRequest, RegisterRequest, ForgotPasswordRequest, ChangePasswordRequest, ProfileUpdateRequest
+from app.schemas.auth import (
+    Token,
+    TokenPayload,
+    LoginRequest,
+    RegisterRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    ActivateRequest,
+    ChangePasswordRequest,
+    ProfileUpdateRequest,
+)
 from app.schemas.user import UserCreate, UserUpdate, UserResponse
 from app.schemas.customer import CustomerCreate, CustomerUpdate, CustomerResponse
 from app.schemas.lead import LeadCreate, LeadUpdate, LeadResponse, LeadListResponse
@@ -21,6 +31,8 @@ __all__ = [
     "LoginRequest",
     "RegisterRequest",
     "ForgotPasswordRequest",
+    "ResetPasswordRequest",
+    "ActivateRequest",
     "ChangePasswordRequest",
     "ProfileUpdateRequest",
     "UserCreate",

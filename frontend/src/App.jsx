@@ -27,11 +27,14 @@ import ContactPage from "./components/ContactPage";
 import LoginPage from "./components/LoginPage";
 import SignupPage from "./components/SignupPage";
 import ForgotPasswordPage from "./components/ForgotPasswordPage";
+import ResetPasswordPage from "./components/ResetPasswordPage";
+import ActivatePage from "./components/ActivatePage";
 import { DashboardDataProvider } from "./context/DashboardDataContext";
 import { themes } from "./context/ThemeContext";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ActivatePage from "./components/ActivatePage";
+import { AuthProvider, ProtectedRoute } from "./context/AuthContext";
 
 function PublicSite() {
   const [isDark, setIsDark] = useState(false);
@@ -99,6 +102,11 @@ function PublicSite() {
       case "forgot-password":
       case "forgot password":
         return <ForgotPasswordPage theme={theme} navigate={navigate} />;
+      case "reset-password":
+      case "resetpassword":
+        return <ResetPasswordPage theme={theme} />;
+      case "activate":
+        return <ActivatePage theme={theme} />;
       case "home":
       default:
         return <HomePage theme={theme} navigate={navigate} setCurrentPage={navigate} />;
@@ -143,6 +151,7 @@ export default function App() {
         <DashboardDataProvider>
           <Routes>
             {/* Admin Dashboard Protected Nested Routes */}
+            {/* Admin Dashboard Nested Routes */}
             <Route
               path="/dashboard"
               element={
@@ -160,6 +169,70 @@ export default function App() {
               <Route path="calculators" element={<Calculators />} />
               <Route path="faqs" element={<Faqs />} />
               <Route
+                index
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="customers"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Customers />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="leads"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Leads />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="site-surveys"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <SiteSurveys />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="projects"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Projects />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="blog"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                    <BlogManagement />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="calculators"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Calculators />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="faqs"
+                element={
+                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                    <Faqs />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
                 path="users"
                 element={
                   <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
@@ -175,11 +248,19 @@ export default function App() {
                   </ProtectedRoute>
                 }
               />
-              <Route path="profile" element={<MyProfile />} />
+              <Route
+                path="profile"
+                element={
+                  <ProtectedRoute>
+                    <MyProfile />
+                  </ProtectedRoute>
+                }
+              />
             </Route>
 
             {/* Public Site Routes */}
             <Route path="/login" element={<LoginPage theme={theme} />} />
+            <Route path="/reset-password" element={<ResetPasswordPage theme={theme} />} />
             <Route path="/activate" element={<ActivatePage theme={theme} />} />
             <Route path="/*" element={<PublicSite />} />
           </Routes>

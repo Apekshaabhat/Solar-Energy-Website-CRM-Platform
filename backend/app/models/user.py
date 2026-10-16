@@ -12,7 +12,10 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     phone = Column(String(50), nullable=True)
     role = Column(String(50), default="Sales Rep", nullable=False)  # Admin, Manager, Sales Rep, Support, Customer
-    status = Column(String(50), default="Active", nullable=False)  # Active, Invited, Inactive
+    status = Column(String(50), default="Active", nullable=False)  # Active, Invited, Pending, Inactive
+    failed_attempts = Column(Integer, default=0, nullable=False, server_default="0")
+    locked_until = Column(DateTime(timezone=True), nullable=True)
+    token_version = Column(Integer, default=0, nullable=False, server_default="0")
     last_login = Column(DateTime(timezone=True), nullable=True)
     
     # Customer Account Linking (1:1 account linking for customer portal users)

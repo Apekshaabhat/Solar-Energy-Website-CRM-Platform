@@ -9,7 +9,7 @@ import Pagination from "../../components/dashboard/Pagination";
 import Modal from "../../components/dashboard/Modal";
 import { FormField, TextInput, SelectInput } from "../../components/dashboard/FormField";
 import { leadsTabOrder } from "../../data/dashboardData";
-import { leadService } from "../../services/leadService";
+import { leadsApi } from "../../api/leads";
 import { useDashboardData } from "../../context/DashboardDataContext";
 import { todayISO } from "../../utils/dashboardDate";
 
@@ -146,7 +146,7 @@ export default function Leads() {
       setLoading(true);
       setError("");
       try {
-        const response = await leadService.getLeads({
+        const response = await leadsApi.getLeads({
           page: targetPage,
           limit: 10,
           search,
@@ -156,7 +156,7 @@ export default function Leads() {
           status: tabFilterMap[activeTab] || statusFilter,
         });
         setLeads(response.items || []);
-        setTabCounts(response.tabCounts || {});
+        setTabCounts(response.tabCounts || response.tab_counts || {});
         setTotal(response.total || 0);
         setTotalPages(response.total_pages || response.totalPages || 1);
       } catch (err) {
@@ -219,8 +219,8 @@ export default function Leads() {
     setError("");
     setSuccessMsg("");
     try {
-      const result = await leadService.contactLead(lead.id);
-      setSuccessMsg(`Lead contacted! Customer #${result.lead?.customer_id} linked.`);
+      const result = await leadsApi.contactLead(lead.id);
+      setSuccessMsg(`Lead contacted! Customer #${result.lead?.customer_id || result.customer_id || ""} linked.`);
       notifyCrmChange("leads");
       await loadLeads(page);
     } catch (err) {
@@ -237,7 +237,7 @@ export default function Leads() {
     setError("");
     setSuccessMsg("");
     try {
-      const res = await leadService.scheduleSurvey(surveyLead.id, {
+      const res = await leadsApi.scheduleSurvey(surveyLead.id, {
         survey_date: surveyForm.surveyDate,
         time_slot: surveyForm.timeSlot,
         assigned_to: surveyForm.assignedTo,
@@ -245,7 +245,7 @@ export default function Leads() {
         capacity_estimate: surveyForm.capacityEstimate,
         notes: surveyForm.notes,
       });
-      setSuccessMsg(`Site survey #${res.survey?.id} scheduled successfully for ${surveyLead.name}!`);
+      setSuccessMsg(`Site survey scheduled successfully for ${surveyLead.name}!`);
       setScheduleModalOpen(false);
       setSurveyLead(null);
       notifyCrmChange("site_surveys");
@@ -264,14 +264,14 @@ export default function Leads() {
     setError("");
     setSuccessMsg("");
     try {
-      const res = await leadService.convertLead(convertLead.id, {
+      const res = await leadsApi.convertLead(convertLead.id, {
         project_name: convertForm.projectName.trim(),
         category: convertForm.category,
         capacity: convertForm.capacity,
         capacity_kw: Number(convertForm.capacityKW) || 0,
         estimated_cost: Number(convertForm.estimatedCost) || 0,
       });
-      setSuccessMsg(`Lead converted! Project #${res.project?.id} created.`);
+      setSuccessMsg(`Lead converted! Project created.`);
       setConvertModalOpen(false);
       setConvertLead(null);
       notifyCrmChange("projects");
@@ -295,9 +295,9 @@ export default function Leads() {
     setError("");
     try {
       if (editingLead) {
-        await leadService.updateLead(editingLead.id, form);
+        await leadsApi.updateLead(editingLead.id, form);
       } else {
-        await leadService.createLead({ ...form, status: "New" });
+        await leadsApi.createLead({ ...form, status: "New" });
       }
       notifyCrmChange("leads");
       setModalOpen(false);
@@ -322,7 +322,7 @@ export default function Leads() {
     setError("");
     setSuccessMsg("");
     try {
-      await leadService.cancelLead(lead.id, targetStatus);
+      await leadsApi.cancelLead(lead.id, targetStatus);
       setSuccessMsg(`Lead '${lead.name}' marked as ${targetStatus}.`);
       notifyCrmChange("leads");
       notifyCrmChange("customers");

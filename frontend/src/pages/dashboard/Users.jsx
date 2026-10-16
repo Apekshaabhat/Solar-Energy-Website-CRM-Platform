@@ -32,6 +32,17 @@ function getInitials(name, email) {
 }
 
 // Role badge styling
+import React, { useState, useEffect, useCallback } from "react";
+import { Search, Plus, Pencil, Trash2, X } from "lucide-react";
+import { usersApi } from "../../api/users";
+
+function getInitials(name) {
+  if (!name) return "U";
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
+
 function getRoleBadge(role) {
   switch (role) {
     case "Admin":
@@ -50,30 +61,18 @@ function getRoleBadge(role) {
 }
 
 export default function Users() {
-  const { user: currentUser, isAdmin, isManager } = useAuth();
-
   const [users, setUsers] = useState([]);
-  const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedRole, setSelectedRole] = useState("ALL");
-  const [selectedStatus, setSelectedStatus] = useState("ALL");
 
-  // Notifications
-  const [errorMsg, setErrorMsg] = useState("");
-  const [successMsg, setSuccessMsg] = useState("");
-
-  // Modals
-  const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [selectedUser, setSelectedUser] = useState(null);
-  const [inviteResult, setInviteResult] = useState(null);
-
-  // Form states
-  const [inviteForm, setInviteForm] = useState({
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
+  const [formData, setFormData] = useState({
     name: "",
     email: "",
+    phone: "",
     role: "Sales Rep",
     phone: "",
     notes: "",
@@ -85,6 +84,29 @@ export default function Users() {
     status: "Active",
     phone: "",
   });
+    status: "Active",
+    password: "",
+  });
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const response = await usersApi.getUsers({
+        search: searchQuery.trim() || undefined,
+      });
+      const items = Array.isArray(response) ? response : response.items || [];
+      setUsers(items);
+    } catch (err) {
+      setError(err.message || "Failed to load users.");
+    } finally {
+      setLoading(false);
+    }
+  }, [searchQuery]);
+
+  useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -141,9 +163,12 @@ export default function Users() {
     setInviteForm({
       name: "",
       email: "",
+      phone: "",
       role: "Sales Rep",
       phone: "",
       notes: "",
+      status: "Active",
+      password: "",
     });
     setIsInviteModalOpen(true);
   };
@@ -163,6 +188,17 @@ export default function Users() {
     } finally {
       setSubmitting(false);
     }
+  const openEditModal = (user) => {
+    setEditingUser(user);
+    setFormData({
+      name: user.name || "",
+      email: user.email || "",
+      phone: user.phone || "",
+      role: user.role || "Sales Rep",
+      status: user.status || "Active",
+      password: "",
+    });
+    setIsModalOpen(true);
   };
 
   // Open edit modal
@@ -177,85 +213,52 @@ export default function Users() {
     setIsEditModalOpen(true);
   };
 
-  // Submit edit
-  const handleSubmitEdit = async (e) => {
+  const handleSaveUser = async (e) => {
     e.preventDefault();
-    if (!selectedUser) return;
-    setSubmitting(true);
-    setErrorMsg("");
+    if (!formData.name.trim() || !formData.email.trim()) return;
+
+    setSaving(true);
+    setError("");
     try {
-      await userService.updateUser(selectedUser.id, editForm);
-      setSuccessMsg(`User ${selectedUser.name || selectedUser.email} updated successfully.`);
-      setIsEditModalOpen(false);
-      setSelectedUser(null);
-      await loadData();
+      const payload = {
+        name: formData.name.trim(),
+        email: formData.email.trim(),
+        phone: formData.phone.trim() || undefined,
+        role: formData.role,
+        status: formData.status,
+      };
+      if (formData.password) {
+        payload.password = formData.password;
+      }
+
+      if (editingUser) {
+        await usersApi.updateUser(editingUser.id, payload);
+      } else {
+        await usersApi.createUser({
+          ...payload,
+          password: formData.password || "Password123!",
+        });
+      }
+      closeModal();
+      await loadUsers();
     } catch (err) {
-      setErrorMsg(err.message || "Failed to update user.");
+      setError(err.message || "Failed to save user.");
     } finally {
-      setSubmitting(false);
+      setSaving(false);
     }
   };
 
-  // Toggle active/inactive
-  const handleToggleStatus = async (user) => {
-    const nextStatus = user.status === "Active" ? "Inactive" : "Active";
-    const actionLabel = nextStatus === "Active" ? "activate" : "deactivate";
-    if (!window.confirm(`Are you sure you want to ${actionLabel} ${user.name || user.email}?`)) {
-      return;
-    }
-
-    try {
-      await userService.updateUser(user.id, { status: nextStatus });
-      setSuccessMsg(`User ${user.name || user.email} is now ${nextStatus}.`);
-      await loadData();
-    } catch (err) {
-      setErrorMsg(err.message || `Failed to ${actionLabel} user.`);
-    }
-  };
-
-  // Delete user
-  const handleDeleteUser = async (user) => {
-    if (
-      !window.confirm(
-        `Are you sure you want to delete ${user.name || user.email}? This will remove the account or clear safe relationships.`
-      )
-    ) {
-      return;
-    }
-
-    try {
-      await userService.deleteUser(user.id);
-      setSuccessMsg(`User ${user.name || user.email} was removed.`);
-      await loadData();
-    } catch (err) {
-      setErrorMsg(err.message || "Failed to delete user.");
-    }
-  };
-
-  // View Details
-  const handleOpenDetails = async (user) => {
-    try {
-      const detailed = await userService.getUser(user.id);
-      setSelectedUser(detailed);
-      setIsDetailModalOpen(true);
-    } catch (err) {
-      setErrorMsg(err.message || "Failed to fetch detailed profile.");
-    }
-  };
-
-  // Backfill Customer Links
-  const handleBackfillCustomers = async () => {
-    if (!window.confirm("Run customer reconciliation to match users with CRM customer records?")) {
-      return;
-    }
-    try {
-      const res = await userService.backfillCustomers();
-      setSuccessMsg(
-        `Reconciliation complete: ${res.matched} accounts matched, ${res.unresolved} unresolved.`
-      );
-      await loadData();
-    } catch (err) {
-      setErrorMsg(err.message || "Reconciliation failed.");
+  const handleDeleteUser = async (userId) => {
+    if (window.confirm("Are you sure you want to delete this user?")) {
+      setSaving(true);
+      try {
+        await usersApi.deleteUser(userId);
+        await loadUsers();
+      } catch (err) {
+        setError(err.message || "Failed to delete user.");
+      } finally {
+        setSaving(false);
+      }
     }
   };
 
@@ -396,6 +399,21 @@ export default function Users() {
       )}
 
       {/* Filter and Search Bar */}
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
+          Users
+        </h1>
+        <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">
+          Manage team members and their access levels.
+        </p>
+      </div>
+
+      {error && (
+        <div className="p-4 rounded-xl bg-red-50 dark:bg-red-950/20 border border-red-200 text-sm text-red-700 dark:text-red-300">
+          {error}
+        </div>
+      )}
+
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
         <div className="relative flex-1 max-w-md">
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
@@ -404,7 +422,7 @@ export default function Users() {
             placeholder="Search by name, email, or role..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30 focus:border-[#1F5C3E] transition-colors"
+            className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
           />
         </div>
 
@@ -433,9 +451,16 @@ export default function Users() {
             <option value="Inactive">Inactive</option>
           </select>
         </div>
+        <button
+          type="button"
+          onClick={openCreateModal}
+          className="inline-flex items-center justify-center gap-2 bg-[#1F5C3E] hover:bg-[#184931] text-white text-sm font-medium rounded-xl px-4 py-2.5 transition-colors shadow-sm cursor-pointer"
+        >
+          <Plus className="w-4 h-4" />
+          <span>Invite / Add User</span>
+        </button>
       </div>
 
-      {/* Users Table */}
       <div className="bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto no-scrollbar">
           <table className="w-full text-left text-sm border-collapse min-w-[720px]">
@@ -461,6 +486,12 @@ export default function Users() {
                 </tr>
               ) : filteredUsers.length > 0 ? (
                 filteredUsers.map((user) => (
+                  <td colSpan={5} className="py-12 text-center text-gray-500 text-sm">
+                    Loading users...
+                  </td>
+                </tr>
+              ) : users.length > 0 ? (
+                users.map((user) => (
                   <tr
                     key={user.id}
                     className="hover:bg-gray-50/70 dark:hover:bg-[#152019]/60 transition-colors"
@@ -754,11 +785,12 @@ export default function Users() {
 
       {/* EDIT USER MODAL */}
       {isEditModalOpen && selectedUser && (
+      {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-[#293227] pb-3">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                Edit User ({selectedUser.email})
+                {editingUser ? "Edit User" : "Add New User"}
               </h3>
               <button
                 type="button"
@@ -777,9 +809,24 @@ export default function Users() {
                 <input
                   type="text"
                   required
-                  value={editForm.name}
-                  onChange={(e) => setEditForm({ ...editForm, name: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30 focus:border-[#1F5C3E]"
+                  placeholder="e.g. Jane Doe"
+                  value={formData.name}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  Phone Number
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="e.g. jane@solara.com"
+                  value={formData.email}
+                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
                 />
               </div>
 
@@ -789,9 +836,10 @@ export default function Users() {
                 </label>
                 <input
                   type="tel"
-                  value={editForm.phone}
-                  onChange={(e) => setEditForm({ ...editForm, phone: e.target.value })}
-                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30 focus:border-[#1F5C3E]"
+                  placeholder="e.g. +91 98765 43210"
+                  value={formData.phone}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
                 />
               </div>
 
@@ -801,10 +849,9 @@ export default function Users() {
                     Role
                   </label>
                   <select
-                    value={editForm.role}
-                    disabled={!isAdmin}
-                    onChange={(e) => setEditForm({ ...editForm, role: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30 focus:border-[#1F5C3E]"
+                    value={formData.role}
+                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
                   >
                     <option value="Admin">Admin</option>
                     <option value="Manager">Manager</option>
@@ -822,16 +869,28 @@ export default function Users() {
                     Status
                   </label>
                   <select
-                    value={editForm.status}
-                    disabled={!isAdmin && selectedUser.role === "Admin"}
-                    onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30 focus:border-[#1F5C3E]"
+                    value={formData.status}
+                    onChange={(e) => setFormData({ ...formData, status: e.target.value })}
+                    className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
                   >
                     <option value="Active">Active</option>
                     <option value="Invited">Invited</option>
                     <option value="Inactive">Inactive</option>
                   </select>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                  Password {editingUser ? "(Leave blank to keep unchanged)" : "(Optional)"}
+                </label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
+                />
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100 dark:border-[#293227]">
@@ -844,10 +903,10 @@ export default function Users() {
                 </button>
                 <button
                   type="submit"
-                  disabled={submitting}
-                  className="bg-[#1F5C3E] hover:bg-[#184931] text-white text-sm font-medium rounded-xl px-4 py-2.5 transition shadow-sm"
+                  disabled={saving}
+                  className="bg-[#1F5C3E] hover:bg-[#184931] text-white text-sm font-medium rounded-xl px-4 py-2.5 transition-colors shadow-sm cursor-pointer disabled:opacity-60"
                 >
-                  {submitting ? "Saving..." : "Save Changes"}
+                  {saving ? "Saving..." : editingUser ? "Save Changes" : "Save User"}
                 </button>
               </div>
             </form>

@@ -9,7 +9,7 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import Eyebrow from "./Eyebrow";
-import { calculatorService } from "../services/calculatorService";
+import { calculatorsApi } from "../api/calculators";
 
 export default function RoofCapacityCalculator(props) {
   const theme = props.t || props.theme || {
@@ -40,15 +40,15 @@ export default function RoofCapacityCalculator(props) {
     setIsSubmitting(true);
 
     try {
-      const estimate = await calculatorService.calculateRoofCapacity({
-        roofArea,
+      const estimate = await calculatorsApi.estimateRoofCapacity({
+        roof_area: Number(roofArea) || 0,
         shading,
         orientation,
       });
       setResults({
-        panelCount: estimate.panel_count,
-        systemSizeKW: estimate.system_size_kw,
-        annualGeneration: estimate.annual_generation,
+        panelCount: estimate.panel_count ?? estimate.panelCount,
+        systemSizeKW: estimate.system_size_kw ?? estimate.systemSizeKW,
+        annualGeneration: estimate.annual_generation ?? estimate.annualGeneration,
       });
       setCalculated(true);
     } catch (err) {

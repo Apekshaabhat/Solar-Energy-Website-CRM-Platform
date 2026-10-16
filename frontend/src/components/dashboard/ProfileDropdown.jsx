@@ -55,6 +55,18 @@ function ProfileDropdown() {
   const displayName = user?.name || "User";
   const displayRole = user?.role ? `${user.role}` : "";
   const displayEmail = user?.email || "";
+    { label: "Settings", icon: Settings, onClick: () => navigate("/dashboard/settings") },
+    { label: "Logout", icon: LogOut, onClick: handleLogout, danger: true },
+  ];
+
+  const initials = user?.name
+    ? user.name
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .toUpperCase()
+        .slice(0, 2)
+    : "U";
 
   return (
     <div className="relative" ref={dropdownRef}>
@@ -71,6 +83,11 @@ function ProfileDropdown() {
             {displayName} <span className="text-xs text-[#1F5C3E] font-semibold">({displayRole})</span>
           </span>
           <span className="block text-[11px] text-gray-500 dark:text-[#8A968C]">{displayEmail}</span>
+            {user?.name || "User"}
+          </span>
+          <span className="block text-[11px] text-gray-500 dark:text-[#8A968C]">
+            {user?.email || ""}
+          </span>
         </span>
         <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
