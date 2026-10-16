@@ -86,5 +86,24 @@ def require_roles(allowed_roles: List[str]):
     return role_checker
 
 
+def require_admin(current_user: User = Depends(get_current_user)) -> User:
+    if current_user.role != "Admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation requires Administrator privileges."
+        )
+    return current_user
+
+
+def require_staff(current_user: User = Depends(get_current_user)) -> User:
+    if not is_staff_user(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Operation requires staff privileges."
+        )
+    return current_user
+
+
 def is_staff_user(user: Optional[User]) -> bool:
     return user is not None and user.role.lower() in STAFF_ROLE_SET
+

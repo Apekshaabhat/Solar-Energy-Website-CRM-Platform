@@ -1,7 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
 from app.core.database import get_db
 from app.dependencies.auth import get_optional_current_user, is_staff_user, require_roles
@@ -21,6 +21,8 @@ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
 )
 def list_faqs(
     published_only: Optional[bool] = Query(False, description="Filter published FAQs only"),
+    search: Optional[str] = Query(None, description="Search by question or answer"),
+    category: Optional[str] = Query(None, description="Filter by category"),
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
@@ -28,7 +30,14 @@ def list_faqs(
     is_staff = is_staff_user(current_user)
     if published_only or not is_staff:
         query = query.filter(FAQ.is_published == True)
-    
+
+    if search:
+        s = f"%{search.strip()}%"
+        query = query.filter(or_(FAQ.question.ilike(s), FAQ.answer.ilike(s)))
+
+    if category and category not in ["All", "All Categories"]:
+        query = query.filter(FAQ.category.ilike(category))
+
     faqs = query.order_by(FAQ.display_order.asc(), desc(FAQ.created_at)).all()
     return APIResponse(
         success=True,

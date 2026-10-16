@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, func
 from sqlalchemy.orm import relationship
 from app.core.database import Base
 
@@ -14,6 +14,14 @@ class User(Base):
     role = Column(String(50), default="Sales Rep", nullable=False)  # Admin, Manager, Sales Rep, Support, Customer
     status = Column(String(50), default="Active", nullable=False)  # Active, Invited, Inactive
     last_login = Column(DateTime(timezone=True), nullable=True)
+    
+    # Customer Account Linking (1:1 account linking for customer portal users)
+    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
+
+    # Secure Single-Use Expiring Invitation Token
+    invitation_token_hash = Column(String(255), nullable=True, index=True)
+    invitation_expires_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -23,3 +31,6 @@ class User(Base):
     projects = relationship("Project", back_populates="assigned_user", foreign_keys="Project.assigned_user_id")
     site_surveys = relationship("SiteSurvey", back_populates="assigned_user", foreign_keys="SiteSurvey.assigned_user_id")
     blogs = relationship("BlogPost", back_populates="author_user", foreign_keys="BlogPost.author_id")
+    customer_account = relationship("Customer", foreign_keys=[customer_id])
+    notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan", foreign_keys="Notification.user_id")
+

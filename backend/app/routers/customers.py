@@ -24,15 +24,41 @@ from app.services.dashboard_service import format_relative_time
 
 router = APIRouter(prefix="/customers", tags=["Customers Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
+ALL_ROLES = ["Admin", "Manager", "Sales Rep", "Support", "Customer"]
 NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}
 
 
-def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
+def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
     if user_id is None:
-        return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign to an inactive user account.")
+    if target_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign customer to a non-staff account.")
+    return target_user
+
+
+def check_customer_access(customer: Customer, current_user: User) -> None:
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role == "Customer":
+        if not current_user.customer_id or customer.id != current_user.customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You are only authorized to access your own customer account."
+            )
+        return
+    if current_user.role in ["Sales Rep", "Support"]:
+        if customer.assigned_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You are only authorized to access customers assigned to you."
+            )
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
 
 def apply_customer_update(customer: Customer, update_data: dict) -> None:
@@ -57,10 +83,19 @@ def list_customers(
     status_filter: Optional[str] = Query(None, alias="status"),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
     query = db.query(Customer)
+
+    # Scoping
+    if current_user.role in ["Sales Rep", "Support"]:
+        query = query.filter(Customer.assigned_user_id == current_user.id)
+    elif current_user.role == "Customer":
+        if current_user.customer_id:
+            query = query.filter(Customer.id == current_user.customer_id)
+        else:
+            query = query.filter(Customer.email == current_user.email)
 
     if search:
         s = f"%{search.strip()}%"
@@ -161,9 +196,13 @@ def create_customer(
 )
 def get_customer_overview(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
     overview_data = CRMService.get_customer_overview(db, customer_id)
     return APIResponse(success=True, data=CustomerOverviewResponse(**overview_data))
 
@@ -175,9 +214,14 @@ def get_customer_overview(
 )
 def get_customer_leads(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
     leads = db.query(Lead).filter(Lead.customer_id == customer_id).order_by(desc(Lead.created_at)).all()
     items = []
     for l in leads:
@@ -195,9 +239,14 @@ def get_customer_leads(
 )
 def get_customer_site_surveys(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
     surveys = db.query(SiteSurvey).filter(SiteSurvey.customer_id == customer_id).order_by(desc(SiteSurvey.created_at)).all()
     return APIResponse(success=True, data=[SiteSurveyResponse.model_validate(s) for s in surveys])
 
@@ -209,9 +258,14 @@ def get_customer_site_surveys(
 )
 def get_customer_projects(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
     projects = db.query(Project).filter(Project.customer_id == customer_id).order_by(desc(Project.created_at)).all()
     items = []
     for p in projects:
@@ -231,9 +285,14 @@ def get_customer_projects(
 )
 def get_customer_activities(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
     activities = db.query(Activity).filter(Activity.customer_id == customer_id).order_by(desc(Activity.created_at)).all()
     items = []
     for a in activities:
@@ -250,12 +309,14 @@ def get_customer_activities(
 )
 def get_customer(
     customer_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
     resp = CustomerResponse.model_validate(customer)
     resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
     return APIResponse(success=True, data=resp)
@@ -269,16 +330,29 @@ def get_customer(
 def update_customer(
     customer_id: int,
     request: CustomerUpdate,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
     customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
+    check_customer_access(customer, current_user)
+
+    update_data = request.model_dump(exclude_unset=True)
+
+    # Customers cannot reassign staff or alter status
+    if current_user.role == "Customer":
+        update_data.pop("assigned_user_id", None)
+        update_data.pop("status", None)
+    elif "assigned_user_id" in update_data:
+        if current_user.role not in ["Admin", "Manager"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can assign or reassign customers."
+            )
+        validate_user_reference(db, update_data.get("assigned_user_id"))
 
     old_status = customer.status
-    update_data = request.model_dump(exclude_unset=True)
-    validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_customer_update(customer, update_data)
 
     if customer.status != old_status:
@@ -331,4 +405,3 @@ def delete_customer(
     )
     db.commit()
     return APIResponse(success=True, message="Customer marked inactive successfully (history preserved)", data=True)
-

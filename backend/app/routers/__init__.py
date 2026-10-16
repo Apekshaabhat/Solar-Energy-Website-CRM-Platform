@@ -9,6 +9,7 @@ from app.routers.faqs import router as faqs_router
 from app.routers.calculators import router as calculators_router
 from app.routers.settings import router as settings_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.notifications import router as notifications_router
 
 __all__ = [
     "auth_router",
@@ -22,4 +23,5 @@ __all__ = [
     "calculators_router",
     "settings_router",
     "dashboard_router",
+    "notifications_router",
 ]

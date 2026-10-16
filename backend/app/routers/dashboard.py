@@ -19,21 +19,23 @@ router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
     description="Returns stat cards, leads trend overview, leads by source distribution, recent leads, and recent activities calculated directly from the database.",
 )
 def get_dashboard_summary(
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
-    return DashboardService.get_summary(db)
+    return DashboardService.get_summary(db, current_user=current_user)
 
 
 @router.get(
     "/activities",
     response_model=APIResponse[List[Dict[str, Any]]],
-    summary="Get real-time CRM activity feed",
+    summary="Get real-time CRM audit activity feed",
+    description="Restricted to Administrators and Managers.",
 )
 def get_dashboard_activities(
     limit: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
+    current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
     activities = DashboardService.get_activities(db, limit=limit)
     return APIResponse(success=True, data=activities)
+

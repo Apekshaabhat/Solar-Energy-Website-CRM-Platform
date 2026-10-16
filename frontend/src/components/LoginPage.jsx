@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
 import AuthShell from './AuthShell';
 import { FormField } from './FormField';
-import { authService } from '../services/authService';
+import { useAuth } from '../context/AuthContext';
 
 export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', border: '#D8DED9', text: '#16231C', textMuted: '#4B584F', green: '#1F5C3E', greenHover: '#184A32', input: '#FFFFFF' } }) {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { login } = useAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,8 +22,12 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
     setIsSubmitting(true);
 
     try {
-      await authService.login({ email, password, rememberMe });
-      navigate('/dashboard');
+      const session = await login({ email, password, rememberMe });
+      if (session?.user?.status && session.user.status !== "Active") {
+        throw new Error(`Your account is currently ${session.user.status}. Please contact an administrator or check your activation link.`);
+      }
+      const redirectPath = location.state?.from?.pathname || '/dashboard';
+      navigate(redirectPath, { replace: true });
     } catch (err) {
       setError(err.message || 'Unable to log in. Please check your details and try again.');
     } finally {

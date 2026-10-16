@@ -23,6 +23,7 @@ from app.schemas.site_survey import SiteSurveyResponse
 from app.schemas.project import ProjectResponse
 from app.schemas.common import APIResponse
 from app.services.crm_service import CRMService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/leads", tags=["Leads Management"])
 
@@ -32,12 +33,23 @@ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
 NULLABLE_LEAD_FIELDS = {"email", "phone", "notes", "estimated_value", "assigned_user_id", "customer_id"}
 
 
-def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
+def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
     if user_id is None:
-        return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot assign lead to an inactive user account."
+        )
+    if target_user.role not in STAFF_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot assign lead to a non-staff user account."
+        )
+    return target_user
 
 
 def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None:
@@ -46,6 +58,26 @@ def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None
     exists = db.query(Customer.id).filter(Customer.id == customer_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Customer not found")
+
+
+def check_lead_access(lead: Lead, current_user: User) -> None:
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role == "Customer":
+        if not current_user.customer_id or lead.customer_id != current_user.customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You are not authorized to view this lead."
+            )
+        return
+    if current_user.role in ["Sales Rep", "Support"]:
+        if lead.assigned_user_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You may only access leads assigned to you."
+            )
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
 
 def apply_lead_update(lead: Lead, update_data: dict) -> None:
@@ -81,10 +113,20 @@ def list_leads(
     source: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
     query = db.query(Lead)
+
+    # Record-level access scoping
+    if current_user.role in ["Sales Rep", "Support"]:
+        query = query.filter(Lead.assigned_user_id == current_user.id)
+    elif current_user.role == "Customer":
+        if current_user.customer_id:
+            query = query.filter(Lead.customer_id == current_user.customer_id)
+        else:
+            query = query.filter(Lead.email == current_user.email)
+
 
     if search:
         s = f"%{search.strip()}%"
@@ -188,6 +230,27 @@ def create_lead(
     if is_staff and lead.status in ["Contacted", "Site Survey", "Quoted", "Converted"]:
         CRMService.find_or_create_customer_for_lead(db, lead)
 
+    if lead.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=lead.assigned_user_id,
+            title="New Lead Assigned",
+            message=f"You have been assigned to lead '{lead.name}'.",
+            notification_type="lead_assigned",
+            entity_type="lead",
+            entity_id=lead.id,
+        )
+    else:
+        NotificationService.notify_roles(
+            db=db,
+            roles=["Admin", "Manager"],
+            title="New Lead Received",
+            message=f"New lead received: '{lead.name}' from {lead.source}.",
+            notification_type="new_lead",
+            entity_type="lead",
+            entity_id=lead.id,
+        )
+
     db.commit()
     db.refresh(lead)
 
@@ -201,12 +264,13 @@ def create_lead(
 )
 def get_lead(
     lead_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
     return APIResponse(success=True, data=build_lead_response(lead, db))
 
 
@@ -218,12 +282,13 @@ def get_lead(
 def update_lead(
     lead_id: int,
     request: LeadUpdate,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
 
     old_status = lead.status
     update_data = request.model_dump(exclude_unset=True)
@@ -240,7 +305,42 @@ def update_lead(
             lead = CRMService.lead_cancel_workflow(db, lead.id, target_status, current_user.id)
         update_data.pop("status", None)
 
-    validate_user_reference(db, update_data.get("assigned_user_id"))
+    # Lead assignment validation & audit
+    if "assigned_user_id" in update_data and update_data["assigned_user_id"] != lead.assigned_user_id:
+        if current_user.role not in ["Admin", "Manager"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators and managers can assign or reassign leads."
+            )
+        target_user = validate_user_reference(db, update_data["assigned_user_id"])
+        old_user = db.query(User).filter(User.id == lead.assigned_user_id).first() if lead.assigned_user_id else None
+        old_name = old_user.name if old_user else "Unassigned"
+        new_name = target_user.name if target_user else "Unassigned"
+
+        CRMService.record_activity(
+            db=db,
+            entity_type="lead",
+            entity_id=lead.id,
+            action="reassigned",
+            title=f"Lead reassigned: {lead.name}",
+            description=f"Assigned staff member changed from {old_name} to {new_name}",
+            customer_id=lead.customer_id,
+            customer_name=lead.name,
+            user_id=current_user.id,
+            status_val=lead.status,
+        )
+
+        if update_data["assigned_user_id"]:
+            NotificationService.create_notification(
+                db=db,
+                user_id=update_data["assigned_user_id"],
+                title="Lead Assigned",
+                message=f"You have been assigned to lead '{lead.name}'.",
+                notification_type="lead_assigned",
+                entity_type="lead",
+                entity_id=lead.id,
+            )
+
     validate_customer_reference(db, update_data.get("customer_id"))
     apply_lead_update(lead, update_data)
 
@@ -261,8 +361,13 @@ def contact_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
     lead = CRMService.lead_contacted_workflow(db, lead_id, current_user.id)
     return APIResponse(success=True, message="Lead contacted and customer linked", data=build_lead_response(lead, db))
+
 
 
 @router.post(
@@ -276,6 +381,11 @@ def schedule_lead_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
+
     result = CRMService.lead_schedule_survey_workflow(
         db,
         lead_id,
@@ -306,6 +416,11 @@ def convert_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
+
     project_data = request.model_dump() if request else {}
     result = CRMService.lead_convert_workflow(
         db,
@@ -340,6 +455,7 @@ def get_lead_related_data(
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
 
     surveys = db.query(SiteSurvey).filter(SiteSurvey.lead_id == lead.id).all()
     projects = db.query(Project).filter(Project.source_lead_id == lead.id).all()
@@ -388,6 +504,10 @@ def cancel_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
     lead = CRMService.lead_cancel_workflow(db, lead_id, status_val, current_user.id)
     return APIResponse(
         success=True,
@@ -406,6 +526,11 @@ def delete_lead(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
+    check_lead_access(lead, current_user)
     CRMService.lead_cancel_workflow(db, lead_id, "Cancelled", current_user.id)
     return APIResponse(success=True, message="Lead cancelled successfully (history preserved)", data=True)
+
 

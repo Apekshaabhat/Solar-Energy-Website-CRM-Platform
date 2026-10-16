@@ -32,17 +32,18 @@ def client():
 
 
 def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@solara.test"):
-    register_response = client.post(
-        "/api/v1/auth/register",
-        json={
-            "name": "Solara Admin",
-            "email": email,
-            "password": "StrongPass123",
-            "phone": "+91 98765 43210",
-            "role": role,
-        },
-    )
-    assert register_response.status_code == 201
+    from app.core.database import SessionLocal
+    from app.services.auth_service import AuthService
+
+    with SessionLocal() as db:
+        AuthService.bootstrap_admin(
+            db=db,
+            name="Solara Test User",
+            email=email,
+            password="StrongPass123",
+            role=role,
+            phone="+91 98765 43210",
+        )
 
     login_response = client.post(
         "/api/v1/auth/login",
@@ -51,3 +52,4 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
     assert login_response.status_code == 200
     token = login_response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
+

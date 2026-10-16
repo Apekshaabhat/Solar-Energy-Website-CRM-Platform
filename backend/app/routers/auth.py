@@ -8,6 +8,7 @@ from app.schemas.auth import (
     Token,
     LoginRequest,
     RegisterRequest,
+    ActivateAccountRequest,
     ForgotPasswordRequest,
     ChangePasswordRequest,
     ProfileUpdateRequest,
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     response_model=APIResponse[UserResponse],
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
-    description="Registers a new user and returns user details. Passwords must be at least 6 characters.",
+    description="Registers a new customer user and returns user details. Passwords must be at least 6 characters.",
 )
 def register(request: RegisterRequest, db: Session = Depends(get_db)):
     user = AuthService.register_user(db, request)
@@ -33,6 +34,22 @@ def register(request: RegisterRequest, db: Session = Depends(get_db)):
         message="User registered successfully",
         data=UserResponse.model_validate(user)
     )
+
+
+@router.post(
+    "/activate",
+    response_model=APIResponse[UserResponse],
+    summary="Activate invited user account",
+    description="Validates single-use expiring invitation token and sets the initial account password.",
+)
+def activate(request: ActivateAccountRequest, db: Session = Depends(get_db)):
+    user = AuthService.activate_account(db, request)
+    return APIResponse(
+        success=True,
+        message="Account activated successfully. You may now log in.",
+        data=UserResponse.model_validate(user),
+    )
+
 
 
 @router.post(

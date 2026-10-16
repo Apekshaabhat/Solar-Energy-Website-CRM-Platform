@@ -12,22 +12,36 @@ import {
   HelpCircle,
   Settings,
   LogOut,
+  Users,
 } from "lucide-react";
 import Topbar from "../components/dashboard/Topbar";
-
-const NAV_ITEMS = [
-  { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },
-  { label: "Leads", icon: Users2, to: "/dashboard/leads" },
-  { label: "Customers", icon: UserSquare2, to: "/dashboard/customers" },
-  { label: "Site Surveys", icon: ClipboardCheck, to: "/dashboard/site-surveys" },
-  { label: "Projects", icon: FolderKanban, to: "/dashboard/projects" },
-  { label: "Calculators", icon: Calculator, to: "/dashboard/calculators" },
-  { label: "Blog Management", icon: FileText, to: "/dashboard/blog" },
-  { label: "FAQs", icon: HelpCircle, to: "/dashboard/faqs" },
-];
+import { useAuth } from "../context/AuthContext";
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
+  const { user, logout, isAdmin, isManager } = useAuth();
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } finally {
+      navigate("/login");
+    }
+  };
+
+  const navItems = [
+    { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard" },
+    ...((isAdmin || isManager) ? [
+      { label: "Users", icon: Users, to: "/dashboard/users" }
+    ] : []),
+    { label: "Leads", icon: Users2, to: "/dashboard/leads" },
+    { label: "Customers", icon: UserSquare2, to: "/dashboard/customers" },
+    { label: "Site Surveys", icon: ClipboardCheck, to: "/dashboard/site-surveys" },
+    { label: "Projects", icon: FolderKanban, to: "/dashboard/projects" },
+    { label: "Calculators", icon: Calculator, to: "/dashboard/calculators" },
+    { label: "Blog Management", icon: FileText, to: "/dashboard/blog" },
+    { label: "FAQs", icon: HelpCircle, to: "/dashboard/faqs" },
+  ];
 
   return (
     <div className="flex min-h-screen bg-[#FBFAF6] dark:bg-[#0E1712] font-sans transition-colors duration-200">
@@ -41,13 +55,13 @@ export default function DashboardLayout() {
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg tracking-tight leading-none text-white">SOLARA</span>
-              <span className="text-[11px] font-medium tracking-tight text-white/60 mt-1">Admin Dashboard</span>
+              <span className="text-[11px] font-medium tracking-tight text-white/60 mt-1">{user?.role || "Admin"} Portal</span>
             </div>
           </div>
 
           {/* Nav List */}
           <nav className="space-y-1.5">
-            {NAV_ITEMS.map(({ label, icon: Icon, to }) => (
+            {navItems.map(({ label, icon: Icon, to }) => (
               <NavLink
                 key={label}
                 to={to}
@@ -67,21 +81,23 @@ export default function DashboardLayout() {
 
         {/* Bottom Section */}
         <div className="pt-4 mt-auto border-t border-white/10 space-y-1.5">
-          <NavLink
-            to="/dashboard/settings"
-            className={({ isActive }) =>
-              `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
-                isActive ? "bg-[#1F5C3E] text-white" : "text-white/70 hover:bg-white/5"
-              }`
-            }
-          >
-            <Settings className="h-4 w-4 flex-shrink-0" />
-            <span>Settings</span>
-          </NavLink>
+          {(isAdmin || isManager) && (
+            <NavLink
+              to="/dashboard/settings"
+              className={({ isActive }) =>
+                `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors ${
+                  isActive ? "bg-[#1F5C3E] text-white" : "text-white/70 hover:bg-white/5"
+                }`
+              }
+            >
+              <Settings className="h-4 w-4 flex-shrink-0" />
+              <span>Settings</span>
+            </NavLink>
+          )}
 
           <button
             type="button"
-            onClick={() => navigate("/login")}
+            onClick={handleLogout}
             className="w-full flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white/70 hover:bg-white/5 transition-colors text-left focus:outline-none cursor-pointer"
           >
             <LogOut className="h-4 w-4 flex-shrink-0" />

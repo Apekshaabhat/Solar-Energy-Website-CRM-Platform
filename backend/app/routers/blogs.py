@@ -149,8 +149,15 @@ def update_blog(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog post not found")
 
     update_data = request.model_dump(exclude_unset=True)
+    if "slug" in update_data and update_data["slug"]:
+        slug_val = update_data["slug"].strip()
+        existing = db.query(BlogPost).filter(BlogPost.slug == slug_val, BlogPost.id != post_id).first()
+        if existing:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Slug already in use by another article")
+        post.slug = slug_val
+
     for field, val in update_data.items():
-        if val is not None:
+        if field != "slug" and val is not None:
             setattr(post, field, val)
 
     db.commit()

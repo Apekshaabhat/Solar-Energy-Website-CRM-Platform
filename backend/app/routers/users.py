@@ -1,45 +1,85 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
-from sqlalchemy import or_, desc
 
 from app.core.database import get_db
-from app.core.security import get_password_hash
 from app.dependencies.auth import get_current_user, require_roles
 from app.models.user import User
-from app.schemas.user import UserCreate, UserUpdate, UserResponse
+from app.schemas.user import (
+    UserCreate,
+    UserInviteRequest,
+    UserUpdate,
+    UserResponse,
+    UserStatsResponse,
+)
 from app.schemas.common import APIResponse
+from app.services.user_service import UserService
 
 router = APIRouter(prefix="/users", tags=["Users Management"])
 
 
 @router.get(
+    "/stats",
+    response_model=APIResponse[UserStatsResponse],
+    summary="Get aggregated user metrics and statistics",
+    description="Returns total users, active/inactive counts, pending invitations, and users by role.",
+)
+def get_user_stats(
+    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    db: Session = Depends(get_db),
+):
+    stats_data = UserService.get_user_stats(db)
+    return APIResponse(
+        success=True,
+        message="User statistics retrieved",
+        data=UserStatsResponse(**stats_data),
+    )
+
+
+@router.get(
     "",
     response_model=APIResponse[List[UserResponse]],
-    summary="List all users",
-    description="Retrieve users list with optional search query and role filter.",
+    summary="List users with search, role, and status filters",
+    description="Retrieve users list. Admin views all users; Managers view non-administrative staff.",
 )
 def list_users(
-    search: Optional[str] = Query(None, description="Search by name or email"),
+    search: Optional[str] = Query(None, description="Search by name, email, or phone"),
     role: Optional[str] = Query(None, description="Filter by role"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    query = db.query(User)
-    if search:
-        s = f"%{search.strip()}%"
-        query = query.filter(or_(User.name.ilike(s), User.email.ilike(s)))
-    if role and role not in ["All", "All Roles"]:
-        query = query.filter(User.role.ilike(role))
-    if status_filter and status_filter not in ["All", "All Status", "All Statuses"]:
-        query = query.filter(User.status.ilike(status_filter))
-
-    users = query.order_by(desc(User.created_at)).all()
+    users = UserService.list_users(
+        db=db,
+        search=search,
+        role=role,
+        status_filter=status_filter,
+        current_user=current_user,
+    )
     return APIResponse(
         success=True,
         message="Users retrieved successfully",
-        data=[UserResponse.model_validate(u) for u in users]
+        data=[UserResponse.model_validate(u) for u in users],
+    )
+
+
+@router.post(
+    "/invite",
+    response_model=APIResponse[UserResponse],
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite a new user with secure single-use token",
+    description="Creates an account in Invited state and generates a single-use expiring invitation token.",
+)
+def invite_user(
+    request: UserInviteRequest,
+    current_user: User = Depends(require_roles(["Admin"])),
+    db: Session = Depends(get_db),
+):
+    user, _ = UserService.invite_user(db, request, acting_user=current_user)
+    return APIResponse(
+        success=True,
+        message="User invitation created successfully.",
+        data=UserResponse.model_validate(user),
     )
 
 
@@ -47,7 +87,7 @@ def list_users(
     "",
     response_model=APIResponse[UserResponse],
     status_code=status.HTTP_201_CREATED,
-    summary="Invite or create a new user",
+    summary="Create or invite a new user",
     description="Allows administrators to add or invite new staff members with specified roles.",
 )
 def create_user(
@@ -55,30 +95,31 @@ def create_user(
     current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
-    existing = db.query(User).filter(User.email == request.email.lower().strip()).first()
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="A user with this email address already exists"
-        )
-    
-    # Default temporary password if not provided
-    pwd = request.password if request.password else "Solara@2026!"
-    user = User(
-        name=request.name.strip(),
-        email=request.email.lower().strip(),
-        password_hash=get_password_hash(pwd),
-        phone=request.phone.strip() if request.phone else None,
+    invite_req = UserInviteRequest(
+        name=request.name,
+        email=request.email,
+        phone=request.phone,
         role=request.role,
-        status=request.status or "Invited"
+        customer_id=request.customer_id,
     )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
+    user, _ = UserService.invite_user(
+        db=db,
+        request=invite_req,
+        acting_user=current_user,
+        initial_password=request.password,
+    )
+    # If explicit password was provided, activate immediately
+    if request.password and (request.status == "Active" or not request.status):
+        user.status = "Active"
+        user.invitation_token_hash = None
+        user.invitation_expires_at = None
+        db.commit()
+        db.refresh(user)
+
     return APIResponse(
         success=True,
         message="User created successfully",
-        data=UserResponse.model_validate(user)
+        data=UserResponse.model_validate(user),
     )
 
 
@@ -86,20 +127,14 @@ def create_user(
     "/{user_id}",
     response_model=APIResponse[UserResponse],
     summary="Get user details by ID",
+    description="Retrieve details of a user. Scoped: Admin can view any user; Managers view non-admins; staff/customers view only self.",
 )
 def get_user(
     user_id: int,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if current_user.role not in ["Admin", "Manager"] and current_user.id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Insufficient permissions to view this user profile"
-        )
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    user = UserService.get_user_by_id(db, user_id, current_user)
     return APIResponse(success=True, data=UserResponse.model_validate(user))
 
 
@@ -107,6 +142,7 @@ def get_user(
     "/{user_id}",
     response_model=APIResponse[UserResponse],
     summary="Update user details",
+    description="Allows authorized updates. Only Admin can change roles; last admin cannot be demoted or deactivated.",
 )
 def update_user(
     user_id: int,
@@ -114,42 +150,11 @@ def update_user(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    if request.email and request.email.lower() != user.email.lower():
-        existing = db.query(User).filter(User.email == request.email.lower()).first()
-        if existing and existing.id != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email is already used by another user"
-            )
-        user.email = request.email.lower().strip()
-
-    if request.name is not None:
-        user.name = request.name.strip()
-    if request.phone is not None:
-        user.phone = request.phone.strip() if request.phone else None
-    if request.role is not None:
-        # Only admin can change roles
-        if current_user.role != "Admin":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only administrators can update user roles"
-            )
-        user.role = request.role
-    if request.status is not None:
-        user.status = request.status
-    if request.password:
-        user.password_hash = get_password_hash(request.password)
-
-    db.commit()
-    db.refresh(user)
+    user = UserService.update_user(db, user_id, request, current_user)
     return APIResponse(
         success=True,
         message="User updated successfully",
-        data=UserResponse.model_validate(user)
+        data=UserResponse.model_validate(user),
     )
 
 
@@ -157,21 +162,30 @@ def update_user(
     "/{user_id}",
     response_model=APIResponse[bool],
     summary="Delete user account",
+    description="Admin-only operation. Reassigns/preserves related CRM history and protects the last active administrator.",
 )
 def delete_user(
     user_id: int,
     current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
-    if current_user.id == user_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot delete your own administrator account"
-        )
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-
-    db.delete(user)
-    db.commit()
+    UserService.delete_user(db, user_id, current_user)
     return APIResponse(success=True, message="User deleted successfully", data=True)
+
+
+@router.post(
+    "/backfill-customers",
+    response_model=APIResponse[dict],
+    summary="Backfill Customer account linkings",
+    description="Reconciles Customer login accounts with CRM customer records.",
+)
+def backfill_customers(
+    current_user: User = Depends(require_roles(["Admin"])),
+    db: Session = Depends(get_db),
+):
+    result = UserService.backfill_customer_users(db)
+    return APIResponse(
+        success=True,
+        message="Customer-User reconciliation completed.",
+        data=result,
+    )

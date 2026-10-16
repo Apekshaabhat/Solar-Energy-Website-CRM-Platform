@@ -13,6 +13,7 @@ from app.models.site_survey import SiteSurvey
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.schemas.common import APIResponse
 from app.services.crm_service import CRMService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/projects", tags=["Projects Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
@@ -29,12 +30,17 @@ NULLABLE_PROJECT_FIELDS = {
 }
 
 
-def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
+def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
     if user_id is None:
-        return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to an inactive user account.")
+    if target_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to a non-staff user account.")
+    return target_user
 
 
 def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None:
@@ -51,6 +57,20 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
     exists = db.query(Lead.id).filter(Lead.id == lead_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source lead not found")
+
+
+def check_project_access(project: Project, current_user: Optional[User]) -> None:
+    if project.is_public:
+        return
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role == "Customer" and current_user.customer_id and project.customer_id == current_user.customer_id:
+        return
+    if current_user.role in ["Sales Rep", "Support"] and project.assigned_user_id == current_user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this project.")
 
 
 def apply_project_update(project: Project, update_data: dict) -> None:
@@ -89,7 +109,13 @@ def list_projects(
     is_staff = is_staff_user(current_user)
 
     if not is_staff:
-        query = query.filter(Project.is_public == True)
+        if current_user and current_user.role == "Customer" and current_user.customer_id:
+            query = query.filter(or_(Project.is_public == True, Project.customer_id == current_user.customer_id))
+        else:
+            query = query.filter(Project.is_public == True)
+    elif current_user and current_user.role in ["Sales Rep", "Support"]:
+        query = query.filter(or_(Project.is_public == True, Project.assigned_user_id == current_user.id))
+
 
     if search:
         s = f"%{search.strip()}%"
@@ -171,6 +197,17 @@ def create_project(
         user_id=current_user.id,
         status_val=project.status,
     )
+
+    if project.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=project.assigned_user_id,
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
 
     db.commit()
     db.refresh(project)
@@ -282,10 +319,9 @@ def get_project(
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    is_staff = is_staff_user(current_user)
-    if not project.is_public and not is_staff:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    check_project_access(project, current_user)
     return APIResponse(success=True, data=build_project_response(project))
+
 
 
 @router.patch(
@@ -304,6 +340,7 @@ def update_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
     old_status = project.status
+    old_assigned = project.assigned_user_id
     update_data = request.model_dump(exclude_unset=True)
     target_status = update_data.get("status")
 
@@ -326,6 +363,28 @@ def update_project(
     validate_lead_reference(db, update_data.get("source_lead_id"))
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_project_update(project, update_data)
+
+    if target_status and target_status != old_status and project.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=project.assigned_user_id,
+            title="Project Status Updated",
+            message=f"Project '{project.name}' moved to {target_status}.",
+            notification_type="project_status",
+            entity_type="project",
+            entity_id=project.id,
+        )
+
+    if "assigned_user_id" in update_data and update_data["assigned_user_id"] and update_data["assigned_user_id"] != old_assigned:
+        NotificationService.create_notification(
+            db=db,
+            user_id=update_data["assigned_user_id"],
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
 
     db.commit()
     db.refresh(project)
