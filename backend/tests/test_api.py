@@ -19,6 +19,8 @@ def staff_headers(client, email, role):
 
 
 def test_seeded_admin_login_uses_dev_password(client):
+    from seed import seed_data
+    seed_data()
     response = client.post(
         "/api/v1/auth/login",
         json={"email": "admin@solara.com", "password": "admin123"},
@@ -75,7 +77,7 @@ def test_register_login_and_me(client):
         json={
             "name": "First User",
             "email": "first@example.com",
-            "password": "password123",
+            "password": "StrongPassword123",
             "role": "Admin",
         },
     )

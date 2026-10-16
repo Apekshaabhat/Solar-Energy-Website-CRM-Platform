@@ -16,50 +16,61 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    tables = insp.get_table_names()
+
     # 1. Add auth hardening columns to users table with safe defaults for existing users
-    op.add_column(
-        "users",
-        sa.Column("failed_attempts", sa.Integer(), nullable=False, server_default=sa.text("0")),
-    )
-    op.add_column(
-        "users",
-        sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
-    )
-    op.add_column(
-        "users",
-        sa.Column("token_version", sa.Integer(), nullable=False, server_default=sa.text("0")),
-    )
+    if "users" in tables:
+        columns = [c["name"] for c in insp.get_columns("users")]
+        if "failed_attempts" not in columns:
+            op.add_column(
+                "users",
+                sa.Column("failed_attempts", sa.Integer(), nullable=False, server_default=sa.text("0")),
+            )
+        if "locked_until" not in columns:
+            op.add_column(
+                "users",
+                sa.Column("locked_until", sa.DateTime(timezone=True), nullable=True),
+            )
+        if "token_version" not in columns:
+            op.add_column(
+                "users",
+                sa.Column("token_version", sa.Integer(), nullable=False, server_default=sa.text("0")),
+            )
 
     # 2. Create revoked_tokens table
-    op.create_table(
-        "revoked_tokens",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("jti", sa.String(length=64), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_revoked_tokens_id", "revoked_tokens", ["id"], unique=False)
-    op.create_index("ix_revoked_tokens_jti", "revoked_tokens", ["jti"], unique=True)
-    op.create_index("ix_revoked_tokens_expires_at", "revoked_tokens", ["expires_at"], unique=False)
+    if "revoked_tokens" not in tables:
+        op.create_table(
+            "revoked_tokens",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("jti", sa.String(length=64), nullable=False),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index("ix_revoked_tokens_id", "revoked_tokens", ["id"], unique=False)
+        op.create_index("ix_revoked_tokens_jti", "revoked_tokens", ["jti"], unique=True)
+        op.create_index("ix_revoked_tokens_expires_at", "revoked_tokens", ["expires_at"], unique=False)
 
     # 3. Create password_reset_tokens table
-    op.create_table(
-        "password_reset_tokens",
-        sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("user_id", sa.Integer(), nullable=False),
-        sa.Column("token_hash", sa.String(length=64), nullable=False),
-        sa.Column("token_type", sa.String(length=20), server_default=sa.text("'reset'"), nullable=False),
-        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
-        sa.ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_password_reset_tokens_user_id_users", ondelete="CASCADE"),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_password_reset_tokens_id", "password_reset_tokens", ["id"], unique=False)
-    op.create_index("ix_password_reset_tokens_user_id", "password_reset_tokens", ["user_id"], unique=False)
-    op.create_index("ix_password_reset_tokens_token_hash", "password_reset_tokens", ["token_hash"], unique=True)
-    op.create_index("ix_password_reset_tokens_expires_at", "password_reset_tokens", ["expires_at"], unique=False)
+    if "password_reset_tokens" not in tables:
+        op.create_table(
+            "password_reset_tokens",
+            sa.Column("id", sa.Integer(), nullable=False),
+            sa.Column("user_id", sa.Integer(), nullable=False),
+            sa.Column("token_hash", sa.String(length=64), nullable=False),
+            sa.Column("token_type", sa.String(length=20), server_default=sa.text("'reset'"), nullable=False),
+            sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+            sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+            sa.ForeignKeyConstraint(["user_id"], ["users.id"], name="fk_password_reset_tokens_user_id_users", ondelete="CASCADE"),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        op.create_index("ix_password_reset_tokens_id", "password_reset_tokens", ["id"], unique=False)
+        op.create_index("ix_password_reset_tokens_user_id", "password_reset_tokens", ["user_id"], unique=False)
+        op.create_index("ix_password_reset_tokens_token_hash", "password_reset_tokens", ["token_hash"], unique=True)
+        op.create_index("ix_password_reset_tokens_expires_at", "password_reset_tokens", ["expires_at"], unique=False)
 
 
 def downgrade() -> None:

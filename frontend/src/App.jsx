@@ -31,9 +31,6 @@ import ResetPasswordPage from "./components/ResetPasswordPage";
 import ActivatePage from "./components/ActivatePage";
 import { DashboardDataProvider } from "./context/DashboardDataContext";
 import { themes } from "./context/ThemeContext";
-import { AuthProvider } from "./context/AuthContext";
-import ProtectedRoute from "./components/ProtectedRoute";
-import ActivatePage from "./components/ActivatePage";
 import { AuthProvider, ProtectedRoute } from "./context/AuthContext";
 
 function PublicSite() {
@@ -151,7 +148,6 @@ export default function App() {
         <DashboardDataProvider>
           <Routes>
             {/* Admin Dashboard Protected Nested Routes */}
-            {/* Admin Dashboard Nested Routes */}
             <Route
               path="/dashboard"
               element={
@@ -160,14 +156,6 @@ export default function App() {
                 </ProtectedRoute>
               }
             >
-              <Route index element={<Dashboard />} />
-              <Route path="customers" element={<Customers />} />
-              <Route path="leads" element={<Leads />} />
-              <Route path="site-surveys" element={<SiteSurveys />} />
-              <Route path="projects" element={<Projects />} />
-              <Route path="blog" element={<BlogManagement />} />
-              <Route path="calculators" element={<Calculators />} />
-              <Route path="faqs" element={<Faqs />} />
               <Route
                 index
                 element={

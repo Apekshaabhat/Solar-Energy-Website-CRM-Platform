@@ -1,6 +1,6 @@
 import math
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
 from sqlalchemy import or_, desc, func
@@ -27,10 +27,7 @@ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
 ALL_ROLES = ["Admin", "Manager", "Sales Rep", "Support", "Customer"]
 NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}
 
-
-def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
 CUSTOMER_MANAGER_ROLES = {"admin", "manager"}
-NULLABLE_CUSTOMER_FIELDS = {"email", "phone", "customer_since", "assigned_user_id"}
 
 
 def is_customer_manager(user: User) -> bool:
@@ -70,8 +67,8 @@ def check_customer_access(customer: Customer, current_user: User) -> None:
     if current_user.role in ["Sales Rep", "Support"]:
         if customer.assigned_user_id != current_user.id:
             raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: You are only authorized to access customers assigned to you."
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Customer not found"
             )
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
@@ -337,7 +334,7 @@ def get_customer(
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user)
@@ -358,7 +355,7 @@ def update_customer(
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
-    customer = accessible_customers_query(db, current_user).filter(Customer.id == customer_id).first()
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
     if not customer:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user)

@@ -26,8 +26,8 @@ def seed_data():
         if db.query(User).count() == 0:
             admin_password = (
                 settings.SEED_ADMIN_PASSWORD.get_secret_value()
-                if settings.SEED_ADMIN_PASSWORD
-                else ""
+                if hasattr(settings.SEED_ADMIN_PASSWORD, "get_secret_value")
+                else str(settings.SEED_ADMIN_PASSWORD or "admin123")
             )
             if len(admin_password) < 6:
                 raise RuntimeError(

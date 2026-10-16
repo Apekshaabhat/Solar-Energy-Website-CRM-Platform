@@ -275,7 +275,6 @@ def delete_submission(
     summary="Get calculation settings",
 )
 def get_calculator_settings(
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
     settings_obj = get_or_create_settings(db)

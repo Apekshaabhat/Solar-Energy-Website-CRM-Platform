@@ -539,7 +539,7 @@ def cancel_lead(
 @router.delete(
     "/{lead_id}",
     response_model=APIResponse[bool],
-    summary="Cancel lead (soft transition preserving CRM history)",
+    summary="Delete lead record",
 )
 def delete_lead(
     lead_id: int,
@@ -550,7 +550,20 @@ def delete_lead(
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
     check_lead_access(lead, current_user)
-    CRMService.lead_cancel_workflow(db, lead_id, "Cancelled", current_user.id)
-    return APIResponse(success=True, message="Lead cancelled successfully (history preserved)", data=True)
+    CRMService.record_activity(
+        db=db,
+        entity_type="lead",
+        entity_id=lead.id,
+        action="deleted",
+        title=f"Lead deleted: {lead.name}",
+        description=f"Lead {lead.id} ({lead.name}) deleted by {current_user.name}",
+        customer_id=lead.customer_id,
+        customer_name=lead.customer.name if lead.customer else lead.name,
+        user_id=current_user.id,
+        status_val="Deleted",
+    )
+    db.delete(lead)
+    db.commit()
+    return APIResponse(success=True, message="Lead deleted successfully", data=True)
 
 
