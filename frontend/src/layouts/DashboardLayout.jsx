@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Settings,
   LogOut,
+  Users,
 } from "lucide-react";
 import Topbar from "../components/dashboard/Topbar";
 import { useAuth } from "../context/AuthContext";
@@ -79,6 +80,7 @@ export default function DashboardLayout() {
 
         {/* Bottom Section */}
         <div className="pt-4 mt-auto border-t border-white/10 space-y-1.5">
+          {(isAdmin || isManager) && (
           {canAccessSettings && (
             <NavLink
               to="/dashboard/settings"
@@ -95,6 +97,7 @@ export default function DashboardLayout() {
 
           <button
             type="button"
+            onClick={handleLogout}
             onClick={async () => {
               await logout();
               navigate("/login");

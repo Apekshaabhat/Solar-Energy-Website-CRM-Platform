@@ -33,6 +33,7 @@ from app.routers import (
     calculators_router,
     settings_router,
     dashboard_router,
+    notifications_router,
 )
 
 # Configure logging
@@ -244,3 +245,4 @@ app.include_router(faqs_router, prefix=api_v1_prefix)
 app.include_router(calculators_router, prefix=api_v1_prefix)
 app.include_router(settings_router, prefix=api_v1_prefix)
 app.include_router(dashboard_router, prefix=api_v1_prefix)
+app.include_router(notifications_router, prefix=api_v1_prefix)

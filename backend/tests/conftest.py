@@ -39,6 +39,18 @@ def client():
 
 
 def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@solara.test"):
+    from app.core.database import SessionLocal
+    from app.services.auth_service import AuthService
+
+    with SessionLocal() as db:
+        AuthService.bootstrap_admin(
+            db=db,
+            name="Solara Test User",
+            email=email,
+            password="StrongPass123",
+            role=role,
+            phone="+91 98765 43210",
+        )
     """Provision an active user with required role directly in DB, then login."""
     with Session(engine) as db:
         user = db.query(User).filter(User.email == email.lower()).first()

@@ -23,6 +23,7 @@ from app.schemas.site_survey import (
 )
 from app.schemas.common import APIResponse
 from app.services.crm_service import CRMService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/site-surveys", tags=["Site Surveys Management"])
 
@@ -39,12 +40,17 @@ NULLABLE_SURVEY_FIELDS = {
 }
 
 
-def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
+def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
     if user_id is None:
-        return
-    exists = db.query(User.id).filter(User.id == user_id).first()
-    if not exists:
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign survey to an inactive user.")
+    if target_user.role not in STAFF_ROLES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign survey to a non-staff user account.")
+    return target_user
 
 
 def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None:
@@ -69,6 +75,26 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
     exists = db.query(Lead.id).filter(Lead.id == lead_id).first()
     if not exists:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Lead not found")
+
+
+def check_survey_access(survey: SiteSurvey, current_user: User) -> None:
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role == "Customer":
+        if not current_user.customer_id or survey.customer_id != current_user.customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You are not authorized to view this site survey."
+            )
+        return
+    if current_user.role in ["Sales Rep", "Support"]:
+        if survey.assigned_user_id != current_user.id and survey.assigned_to != current_user.name:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied: You may only access site surveys assigned to you."
+            )
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
 
 def apply_survey_update(survey: SiteSurvey, update_data: dict) -> None:
@@ -99,10 +125,20 @@ def list_surveys(
     property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
     query = db.query(SiteSurvey)
+
+    # Scoping
+    if current_user.role in ["Sales Rep", "Support"]:
+        query = query.filter(or_(SiteSurvey.assigned_user_id == current_user.id, SiteSurvey.assigned_to == current_user.name))
+    elif current_user.role == "Customer":
+        if current_user.customer_id:
+            query = query.filter(SiteSurvey.customer_id == current_user.customer_id)
+        else:
+            query = query.filter(SiteSurvey.customer_name == current_user.name)
+
 
     if search:
         s = f"%{search.strip()}%"
@@ -263,6 +299,29 @@ def create_survey(
         if lead and lead.status in ["New", "Contacted"]:
             lead.status = "Site Survey"
 
+    if survey.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=survey.assigned_user_id,
+            title="Site Survey Scheduled",
+            message=f"Site survey scheduled for {survey.customer_name} on {survey.survey_date} ({survey.time_slot}).",
+            notification_type="survey_scheduled",
+            entity_type="site_survey",
+            entity_id=survey.id,
+        )
+    if survey.lead_id:
+        lead = db.query(Lead).filter(Lead.id == survey.lead_id).first()
+        if lead and lead.assigned_user_id and lead.assigned_user_id != survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=lead.assigned_user_id,
+                title="Site Survey Scheduled",
+                message=f"Site survey scheduled for your lead {survey.customer_name} on {survey.survey_date}.",
+                notification_type="survey_scheduled",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+
     db.commit()
     db.refresh(survey)
     return APIResponse(
@@ -279,12 +338,13 @@ def create_survey(
 )
 def get_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
     db: Session = Depends(get_db),
 ):
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+    check_survey_access(survey, current_user)
     return APIResponse(success=True, data=SiteSurveyResponse.model_validate(survey))
 
 
@@ -298,6 +358,10 @@ def start_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+    check_survey_access(survey, current_user)
     survey = CRMService.site_survey_start_workflow(db, survey_id, current_user.id)
     return APIResponse(
         success=True,
@@ -317,6 +381,10 @@ def complete_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+    check_survey_access(survey, current_user)
     c_data = request.model_dump(exclude_unset=True) if request else {}
     result = CRMService.site_survey_complete_workflow(db, survey_id, c_data, current_user.id)
     return APIResponse(
@@ -340,6 +408,10 @@ def cancel_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
+    if not survey:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+    check_survey_access(survey, current_user)
     result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
     return APIResponse(
         success=True,
@@ -362,6 +434,7 @@ def update_survey(
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
     if not survey:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+    check_survey_access(survey, current_user)
 
     old_status = survey.status
     update_data = request.model_dump(exclude_unset=True)
@@ -393,6 +466,7 @@ def update_survey(
         message="Site survey updated successfully",
         data=SiteSurveyResponse.model_validate(survey),
     )
+
 
 
 @router.delete(

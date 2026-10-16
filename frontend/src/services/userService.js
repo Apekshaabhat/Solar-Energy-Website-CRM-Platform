@@ -6,6 +6,24 @@ export const userService = {
     return unwrapData(response) || [];
   },
 
+  async getUser(id) {
+    const response = await apiRequest(`/users/${id}`);
+    return unwrapData(response);
+  },
+
+  async inviteUser(payload) {
+    const response = await apiRequest("/users/invite", {
+      method: "POST",
+      body: payload,
+    });
+    return unwrapData(response);
+  },
+
+  async getStats() {
+    const response = await apiRequest("/users/stats");
+    return unwrapData(response);
+  },
+
   async createUser(payload) {
     const response = await apiRequest("/users", {
       method: "POST",
@@ -26,4 +44,12 @@ export const userService = {
     const response = await apiRequest(`/users/${id}`, { method: "DELETE" });
     return unwrapData(response);
   },
+
+  async backfillCustomers() {
+    const response = await apiRequest("/users/backfill-customers", {
+      method: "POST",
+    });
+    return unwrapData(response);
+  },
 };
+

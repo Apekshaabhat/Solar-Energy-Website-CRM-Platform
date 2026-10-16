@@ -10,6 +10,7 @@ from app.models.site_survey import SiteSurvey
 from app.models.project import Project
 from app.models.activity import Activity
 from app.services.dashboard_service import format_relative_time
+from app.services.notification_service import NotificationService
 
 
 VALID_LEAD_TRANSITIONS = {
@@ -51,6 +52,8 @@ class CRMService:
         customer_name: Optional[str] = None,
         user_id: Optional[int] = None,
         status_val: Optional[str] = None,
+        previous_value: Optional[str] = None,
+        new_value: Optional[str] = None,
     ) -> Activity:
         """Create and persist an activity audit log entry."""
         activity = Activity(
@@ -63,6 +66,8 @@ class CRMService:
             customer_name=customer_name,
             user_id=user_id,
             status=status_val,
+            previous_value=previous_value,
+            new_value=new_value,
         )
         db.add(activity)
         return activity
@@ -441,6 +446,27 @@ class CRMService:
 
         CRMService.recalculate_customer_status(db, survey.customer_id)
 
+        if survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=survey.assigned_user_id,
+                title="Site Survey Completed",
+                message=f"Site survey for {survey.customer_name} has been completed.",
+                notification_type="survey_completed",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+        if lead and lead.assigned_user_id and lead.assigned_user_id != survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=lead.assigned_user_id,
+                title="Site Survey Completed",
+                message=f"Site survey completed for {survey.customer_name}. Lead moved to Quoted.",
+                notification_type="survey_completed",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+
         db.commit()
         db.refresh(survey)
         if lead:
@@ -502,6 +528,27 @@ class CRMService:
             )
 
         CRMService.recalculate_customer_status(db, survey.customer_id)
+
+        if survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=survey.assigned_user_id,
+                title="Site Survey Cancelled",
+                message=f"Site survey for {survey.customer_name} was cancelled.",
+                notification_type="survey_cancelled",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+        if lead and lead.assigned_user_id and lead.assigned_user_id != survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=lead.assigned_user_id,
+                title="Site Survey Cancelled",
+                message=f"Site survey for {survey.customer_name} was cancelled.",
+                notification_type="survey_cancelled",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
 
         db.commit()
         db.refresh(survey)
@@ -612,6 +659,17 @@ class CRMService:
         )
 
         CRMService.recalculate_customer_status(db, customer.id)
+
+        if project.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=project.assigned_user_id,
+                title="Project Created",
+                message=f"Project '{project.name}' initialized from converted lead.",
+                notification_type="project_created",
+                entity_type="project",
+                entity_id=project.id,
+            )
 
         db.commit()
         db.refresh(lead)
