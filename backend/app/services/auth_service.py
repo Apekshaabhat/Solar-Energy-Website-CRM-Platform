@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.config import settings
 from app.core.security import (
@@ -57,7 +58,6 @@ class AuthService:
             token_version=0,
             failed_attempts=0,
             locked_until=None,
-            status="Active"
         )
         db.add(user)
         db.commit()
@@ -283,20 +283,24 @@ class AuthService:
 
     @staticmethod
     def update_profile(db: Session, user: User, request: ProfileUpdateRequest) -> User:
-        if request.email and request.email.lower() != user.email.lower():
-            existing = db.query(User).filter(User.email == request.email.lower()).first()
-            if existing and existing.id != user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email address is already in use by another account",
-                )
-            user.email = request.email.lower().strip()
+        try:
+            if request.email and request.email.lower() != user.email.lower():
+                existing = db.query(User).filter(User.email == request.email.lower()).first()
+                if existing and existing.id != user.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email address is already in use by another account",
+                    )
+                user.email = request.email.lower().strip()
 
-        if request.name:
-            user.name = request.name.strip()
-        if request.phone is not None:
-            user.phone = request.phone.strip() if request.phone else None
+            if request.name is not None:
+                user.name = request.name
+            if request.phone is not None:
+                user.phone = request.phone or None
 
-        db.commit()
-        db.refresh(user)
+            db.commit()
+            db.refresh(user)
+        except SQLAlchemyError:
+            db.rollback()
+            raise
         return user

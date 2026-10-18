@@ -459,7 +459,7 @@ def cancel_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+    result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
     return APIResponse(
         success=True,
         message="Site survey cancelled successfully",
@@ -495,7 +495,7 @@ def update_survey(
             res = CRMService.site_survey_complete_workflow(db, survey_id, update_data, current_user.id)
             survey = res["survey"]
         elif target_status == "Cancelled":
-            res = CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+            res = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
             survey = res["survey"]
         # Remove status so apply_survey_update doesn't re-set it
         update_data.pop("status", None)
@@ -539,6 +539,5 @@ def delete_survey(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+    CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
     return APIResponse(success=True, message="Site survey cancelled successfully (history preserved)", data=True)
-

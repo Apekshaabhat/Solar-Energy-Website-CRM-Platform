@@ -1,5 +1,6 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.core.database import get_db
 from app.dependencies.auth import require_roles
@@ -20,7 +21,7 @@ def get_settings(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    settings_obj = db.query(SystemSettings).first()
+    settings_obj = db.query(SystemSettings).order_by(SystemSettings.id.asc()).first()
     if not settings_obj:
         settings_obj = SystemSettings(
             company_name="SOLARA Energy Solutions",
@@ -30,9 +31,13 @@ def get_settings(
             lead_alerts=True,
             two_factor_auth=False,
         )
-        db.add(settings_obj)
-        db.commit()
-        db.refresh(settings_obj)
+        try:
+            db.add(settings_obj)
+            db.commit()
+            db.refresh(settings_obj)
+        except SQLAlchemyError:
+            db.rollback()
+            raise
 
     return APIResponse(
         success=True,
@@ -51,7 +56,7 @@ def update_settings(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    settings_obj = db.query(SystemSettings).first()
+    settings_obj = db.query(SystemSettings).order_by(SystemSettings.id.asc()).first()
     if not settings_obj:
         settings_obj = SystemSettings()
         db.add(settings_obj)
@@ -61,8 +66,12 @@ def update_settings(
         if val is not None:
             setattr(settings_obj, field, val)
 
-    db.commit()
-    db.refresh(settings_obj)
+    try:
+        db.commit()
+        db.refresh(settings_obj)
+    except SQLAlchemyError:
+        db.rollback()
+        raise
     return APIResponse(
         success=True,
         message="Settings updated successfully",

@@ -1,13 +1,14 @@
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import func, desc
+from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
+from sqlalchemy import and_, func, desc, or_, select
 
 from app.models.lead import Lead
 from app.models.site_survey import SiteSurvey
 from app.models.project import Project
 from app.models.customer import Customer
 from app.models.activity import Activity
+from app.models.user import User
 from app.schemas.dashboard import (
     DashboardSummaryResponse,
     StatCardItem,
@@ -34,6 +35,71 @@ ACTIVITY_CONFIGS = {
     "site_survey": {"icon": "calendar", "tint": "bg-leaf-600"},
     "project": {"icon": "check", "tint": "bg-amber-accent"},
 }
+MANAGER_ROLES = {"admin", "manager"}
+
+
+def _is_manager(user: User) -> bool:
+    return user.role.lower() in MANAGER_ROLES
+
+
+def _leads_query(db: Session, user: User) -> SQLAlchemyQuery[Lead]:
+    query = db.query(Lead)
+    if not _is_manager(user):
+        query = query.filter(Lead.assigned_user_id == user.id)
+    return query
+
+
+def _customers_query(db: Session, user: User) -> SQLAlchemyQuery[Customer]:
+    query = db.query(Customer)
+    if not _is_manager(user):
+        query = query.filter(Customer.assigned_user_id == user.id)
+    return query
+
+
+def _surveys_query(db: Session, user: User) -> SQLAlchemyQuery[SiteSurvey]:
+    query = db.query(SiteSurvey)
+    if not _is_manager(user):
+        query = query.filter(SiteSurvey.assigned_user_id == user.id)
+    return query
+
+
+def _projects_query(db: Session, user: User) -> SQLAlchemyQuery[Project]:
+    query = db.query(Project)
+    if not _is_manager(user):
+        query = query.outerjoin(Customer, Project.customer_id == Customer.id).filter(
+            or_(
+                Project.assigned_user_id == user.id,
+                Customer.assigned_user_id == user.id,
+            )
+        )
+    return query
+
+
+def _activities_query(db: Session, user: User) -> SQLAlchemyQuery[Activity]:
+    query = db.query(Activity)
+    if _is_manager(user):
+        return query
+
+    visible_leads = select(Lead.id).where(Lead.assigned_user_id == user.id)
+    visible_customers = select(Customer.id).where(Customer.assigned_user_id == user.id)
+    visible_surveys = select(SiteSurvey.id).where(SiteSurvey.assigned_user_id == user.id)
+    visible_projects = select(Project.id).outerjoin(
+        Customer, Project.customer_id == Customer.id
+    ).where(
+        or_(
+            Project.assigned_user_id == user.id,
+            Customer.assigned_user_id == user.id,
+        )
+    )
+
+    return query.filter(
+        or_(
+            and_(Activity.entity_type == "lead", Activity.entity_id.in_(visible_leads)),
+            and_(Activity.entity_type == "customer", Activity.entity_id.in_(visible_customers)),
+            and_(Activity.entity_type == "site_survey", Activity.entity_id.in_(visible_surveys)),
+            and_(Activity.entity_type == "project", Activity.entity_id.in_(visible_projects)),
+        )
+    )
 
 
 def format_relative_time(dt: Optional[datetime]) -> str:
@@ -72,22 +138,27 @@ def calculate_change_str(current: int, previous: int) -> str:
 
 class DashboardService:
     @staticmethod
-    def get_summary(db: Session) -> DashboardSummaryResponse:
+    def get_summary(db: Session, current_user: User) -> DashboardSummaryResponse:
         now = datetime.now(timezone.utc)
         thirty_days_ago = now - timedelta(days=30)
         sixty_days_ago = now - timedelta(days=60)
+        leads_query = _leads_query(db, current_user)
+        customers_query = _customers_query(db, current_user)
+        surveys_query = _surveys_query(db, current_user)
+        projects_query = _projects_query(db, current_user)
+        activities_query = _activities_query(db, current_user)
 
         # 1. Total counts
-        total_leads_count = db.query(func.count(Lead.id)).scalar() or 0
-        total_surveys_count = db.query(func.count(SiteSurvey.id)).scalar() or 0
+        total_leads_count = leads_query.with_entities(func.count(Lead.id)).scalar() or 0
+        total_surveys_count = surveys_query.with_entities(func.count(SiteSurvey.id)).scalar() or 0
         ongoing_projects_count = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(Project.status.in_(["In Progress", "Planning", "On Hold"]))
             .scalar()
             or 0
         )
         completed_projects_count = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(Project.status == "Completed")
             .scalar()
             or 0
@@ -95,33 +166,33 @@ class DashboardService:
 
         # 2. Month-over-month real calculation
         leads_current_30d = (
-            db.query(func.count(Lead.id))
+            leads_query.with_entities(func.count(Lead.id))
             .filter(Lead.created_at >= thirty_days_ago)
             .scalar()
             or 0
         )
         leads_prev_30d = (
-            db.query(func.count(Lead.id))
+            leads_query.with_entities(func.count(Lead.id))
             .filter(Lead.created_at >= sixty_days_ago, Lead.created_at < thirty_days_ago)
             .scalar()
             or 0
         )
 
         surveys_current_30d = (
-            db.query(func.count(SiteSurvey.id))
+            surveys_query.with_entities(func.count(SiteSurvey.id))
             .filter(SiteSurvey.created_at >= thirty_days_ago)
             .scalar()
             or 0
         )
         surveys_prev_30d = (
-            db.query(func.count(SiteSurvey.id))
+            surveys_query.with_entities(func.count(SiteSurvey.id))
             .filter(SiteSurvey.created_at >= sixty_days_ago, SiteSurvey.created_at < thirty_days_ago)
             .scalar()
             or 0
         )
 
         ongoing_current_30d = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(
                 Project.status.in_(["In Progress", "Planning"]),
                 Project.created_at >= thirty_days_ago,
@@ -130,7 +201,7 @@ class DashboardService:
             or 0
         )
         ongoing_prev_30d = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(
                 Project.status.in_(["In Progress", "Planning"]),
                 Project.created_at >= sixty_days_ago,
@@ -141,7 +212,7 @@ class DashboardService:
         )
 
         completed_current_30d = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(
                 Project.status == "Completed",
                 Project.updated_at >= thirty_days_ago,
@@ -150,7 +221,7 @@ class DashboardService:
             or 0
         )
         completed_prev_30d = (
-            db.query(func.count(Project.id))
+            projects_query.with_entities(func.count(Project.id))
             .filter(
                 Project.status == "Completed",
                 Project.updated_at >= sixty_days_ago,
@@ -197,27 +268,27 @@ class DashboardService:
         ]
 
         # 4. Granular CRM Metrics for full database reflection
-        new_leads = db.query(func.count(Lead.id)).filter(Lead.status == "New").scalar() or 0
-        contacted_leads = db.query(func.count(Lead.id)).filter(Lead.status == "Contacted").scalar() or 0
-        survey_leads = db.query(func.count(Lead.id)).filter(Lead.status == "Site Survey").scalar() or 0
-        quoted_leads = db.query(func.count(Lead.id)).filter(Lead.status == "Quoted").scalar() or 0
-        converted_leads = db.query(func.count(Lead.id)).filter(Lead.status == "Converted").scalar() or 0
-        lost_leads = db.query(func.count(Lead.id)).filter(Lead.status == "Lost").scalar() or 0
+        new_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "New").scalar() or 0
+        contacted_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "Contacted").scalar() or 0
+        survey_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "Site Survey").scalar() or 0
+        quoted_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "Quoted").scalar() or 0
+        converted_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "Converted").scalar() or 0
+        lost_leads = leads_query.with_entities(func.count(Lead.id)).filter(Lead.status == "Lost").scalar() or 0
 
-        total_customers = db.query(func.count(Customer.id)).scalar() or 0
-        active_customers = db.query(func.count(Customer.id)).filter(Customer.status == "Active").scalar() or 0
+        total_customers = customers_query.with_entities(func.count(Customer.id)).scalar() or 0
+        active_customers = customers_query.with_entities(func.count(Customer.id)).filter(Customer.status == "Active").scalar() or 0
 
-        scheduled_surveys = db.query(func.count(SiteSurvey.id)).filter(SiteSurvey.status == "Scheduled").scalar() or 0
-        completed_surveys = db.query(func.count(SiteSurvey.id)).filter(SiteSurvey.status == "Completed").scalar() or 0
+        scheduled_surveys = surveys_query.with_entities(func.count(SiteSurvey.id)).filter(SiteSurvey.status == "Scheduled").scalar() or 0
+        completed_surveys = surveys_query.with_entities(func.count(SiteSurvey.id)).filter(SiteSurvey.status == "Completed").scalar() or 0
 
         pipeline_value = (
-            db.query(func.sum(Lead.estimated_value))
+            leads_query.with_entities(func.sum(Lead.estimated_value))
             .filter(Lead.status.notin_(["Lost", "Converted"]))
             .scalar()
             or 0.0
         )
         completed_project_value = (
-            db.query(func.sum(func.coalesce(Project.actual_cost, Project.estimated_cost, 0)))
+            projects_query.with_entities(func.sum(func.coalesce(Project.actual_cost, Project.estimated_cost, 0)))
             .filter(Project.status == "Completed")
             .scalar()
             or 0.0
@@ -244,7 +315,7 @@ class DashboardService:
 
         # 5. Leads by Source (real database counts)
         source_counts = (
-            db.query(Lead.source, func.count(Lead.id))
+            leads_query.with_entities(Lead.source, func.count(Lead.id))
             .group_by(Lead.source)
             .all()
         )
@@ -267,7 +338,7 @@ class DashboardService:
 
         # 6. Leads Overview (Daily Trend without artificial floors)
         recent_leads = (
-            db.query(Lead.created_at)
+            leads_query.with_entities(Lead.created_at)
             .filter(Lead.created_at >= thirty_days_ago)
             .all()
         )
@@ -294,7 +365,7 @@ class DashboardService:
 
         # 7. Recent Leads (Top 5 actual leads)
         top_leads = (
-            db.query(Lead)
+            leads_query
             .order_by(desc(Lead.created_at))
             .limit(5)
             .all()
@@ -315,7 +386,7 @@ class DashboardService:
 
         # 8. Real Recent Activity Feed
         recent_activity_query = (
-            db.query(Activity)
+            activities_query
             .order_by(desc(Activity.created_at))
             .limit(6)
             .all()
@@ -363,7 +434,7 @@ class DashboardService:
                 )
                 act_id += 1
 
-            for s in db.query(SiteSurvey).order_by(desc(SiteSurvey.created_at)).limit(2).all():
+            for s in surveys_query.order_by(desc(SiteSurvey.created_at)).limit(2).all():
                 recent_activity.append(
                     RecentActivityItem(
                         id=act_id,
@@ -379,7 +450,7 @@ class DashboardService:
                 )
                 act_id += 1
 
-            for p in db.query(Project).order_by(desc(Project.created_at)).limit(2).all():
+            for p in projects_query.order_by(desc(Project.created_at)).limit(2).all():
                 recent_activity.append(
                     RecentActivityItem(
                         id=act_id,
@@ -405,9 +476,9 @@ class DashboardService:
         )
 
     @staticmethod
-    def get_activities(db: Session, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_activities(db: Session, current_user: User, limit: int = 20) -> List[Dict[str, Any]]:
         activities = (
-            db.query(Activity)
+            _activities_query(db, current_user)
             .order_by(desc(Activity.created_at))
             .limit(limit)
             .all()

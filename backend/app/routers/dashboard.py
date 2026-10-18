@@ -28,7 +28,7 @@ def get_dashboard_summary(
     current_user: User = Depends(_dashboard_access),
     db: Session = Depends(get_db),
 ):
-    return DashboardService.get_summary(db)
+    return DashboardService.get_summary(db, current_user)
 
 
 @router.get(
@@ -41,5 +41,5 @@ def get_dashboard_activities(
     current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
     db: Session = Depends(get_db),
 ):
-    activities = DashboardService.get_activities(db, limit=limit)
+    activities = DashboardService.get_activities(db, current_user, limit=limit)
     return APIResponse(success=True, data=activities)

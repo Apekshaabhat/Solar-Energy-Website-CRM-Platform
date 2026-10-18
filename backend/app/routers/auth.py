@@ -165,10 +165,6 @@ def activate(
         success=True,
         message="Account activated successfully. You can now log in.",
         data=True,
-def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Password reset is not configured for this service",
     )
 
 
