@@ -28,18 +28,25 @@ def get_dashboard_summary(
     current_user: User = Depends(_dashboard_access),
     db: Session = Depends(get_db),
 ):
-    return DashboardService.get_summary(db, current_user)
+    return DashboardService.get_summary(db, current_user=current_user)
 
 
 @router.get(
     "/activities",
     response_model=APIResponse[List[Dict[str, Any]]],
-    summary="Get real-time CRM activity feed",
+    summary="Get real-time CRM audit activity feed",
+    description="Returns the authenticated staff member's authorized CRM activity.",
 )
 def get_dashboard_activities(
     limit: int = Query(20, ge=1, le=100),
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support"])),
+    offset: int = Query(0, ge=0, le=10000),
+    current_user: User = Depends(_dashboard_access),
     db: Session = Depends(get_db),
 ):
-    activities = DashboardService.get_activities(db, current_user, limit=limit)
+    activities = DashboardService.get_activities(
+        db,
+        current_user,
+        limit=limit,
+        offset=offset,
+    )
     return APIResponse(success=True, data=activities)

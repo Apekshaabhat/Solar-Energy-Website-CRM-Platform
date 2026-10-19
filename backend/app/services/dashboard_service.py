@@ -18,6 +18,7 @@ from app.schemas.dashboard import (
     RecentActivityItem,
 )
 
+
 SOURCE_COLORS = {
     "Website": "#24b368",
     "Social Media": "#f0a94e",
@@ -313,6 +314,20 @@ class DashboardService:
             "projectRevenue": float(completed_project_value),
         }
 
+        # User aggregations for Admin & Manager
+        if current_user and current_user.role in ["Admin", "Manager"]:
+            total_users = db.query(func.count(User.id)).scalar() or 0
+            active_users = db.query(func.count(User.id)).filter(User.status == "Active").scalar() or 0
+            inactive_users = db.query(func.count(User.id)).filter(User.status == "Inactive").scalar() or 0
+            invited_users = db.query(func.count(User.id)).filter(User.status == "Invited").scalar() or 0
+            roles_query = db.query(User.role, func.count(User.id)).group_by(User.role).all()
+            metrics["totalUsers"] = total_users
+            metrics["activeUsers"] = active_users
+            metrics["inactiveUsers"] = inactive_users
+            metrics["invitedUsers"] = invited_users
+            metrics["usersByRole"] = {r: cnt for r, cnt in roles_query}
+
+
         # 5. Leads by Source (real database counts)
         source_counts = (
             leads_query.with_entities(Lead.source, func.count(Lead.id))
@@ -476,11 +491,17 @@ class DashboardService:
         )
 
     @staticmethod
-    def get_activities(db: Session, current_user: User, limit: int = 20) -> List[Dict[str, Any]]:
+    def get_activities(
+        db: Session,
+        current_user: User,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
         activities = (
             _activities_query(db, current_user)
-            .order_by(desc(Activity.created_at))
+            .order_by(desc(Activity.created_at), desc(Activity.id))
             .limit(limit)
+            .offset(offset)
             .all()
         )
         return [

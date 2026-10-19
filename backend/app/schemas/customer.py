@@ -102,24 +102,6 @@ class CustomerUpdate(BaseModel):
         return validate_choice(value, CUSTOMER_STATUSES, "status")
 
 
-class CustomerResponse(CustomerBase):
-    id: int
-    assigned_user_id: Optional[int] = None
-    account_user_id: Optional[int] = None
-    total_projects: int = 0
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-<<<<<<< HEAD
-class CustomerOverviewResponse(CustomerResponse):
-    leads: list[dict] = []
-    site_surveys: list[dict] = []
-    projects: list[dict] = []
-    activities: list[dict] = []
-=======
 class CustomerProfileUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=2, max_length=150)
     contact: Optional[str] = Field(default=None, min_length=3, max_length=100)
@@ -149,4 +131,21 @@ class CustomerProfileUpdate(BaseModel):
     @classmethod
     def validate_profile_property_type(cls, value: Optional[str]) -> Optional[str]:
         return validate_choice(value, PROPERTY_TYPES, "property_type")
->>>>>>> 2192789 (Implement customer, survey and project authorization)
+
+
+class CustomerResponse(CustomerBase):
+    id: int
+    assigned_user_id: Optional[int] = None
+    account_user_id: Optional[int] = None
+    total_projects: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CustomerOverviewResponse(CustomerResponse):
+    leads: list[dict] = []
+    site_surveys: list[dict] = []
+    projects: list[dict] = []
+    activities: list[dict] = []

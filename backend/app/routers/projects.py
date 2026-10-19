@@ -1,7 +1,8 @@
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import desc, or_
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Query as SQLAlchemyQuery, Session
-from sqlalchemy import or_, desc
 
 from app.core.database import get_db
 from app.dependencies.auth import get_optional_current_user, is_staff_user, require_roles
@@ -13,6 +14,7 @@ from app.models.site_survey import SiteSurvey
 from app.schemas.project import ProjectCreate, ProjectUpdate, ProjectResponse
 from app.schemas.common import APIResponse
 from app.services.crm_service import CRMService
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/projects", tags=["Projects Management"])
 STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
@@ -44,11 +46,14 @@ def accessible_projects_query(
     if is_project_manager(current_user):
         return query
     if is_staff_user(current_user):
-        return manageable_projects_query(db, current_user).filter(
-            or_(
-                Project.is_public.is_(True),
-                Project.assigned_user_id == current_user.id,
-                Customer.assigned_user_id == current_user.id,
+        return (
+            query.outerjoin(Customer, Project.customer_id == Customer.id)
+            .filter(
+                or_(
+                    Project.is_public.is_(True),
+                    Project.assigned_user_id == current_user.id,
+                    Customer.assigned_user_id == current_user.id,
+                )
             )
         )
     if current_user.role.lower() == "customer":
@@ -82,12 +87,17 @@ def manageable_projects_query(
     )
 
 
-def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
+def validate_user_reference(db: Session, user_id: Optional[int]) -> Optional[User]:
     if user_id is None:
-        return
-    user = db.query(User).filter(User.id == user_id).first()
-    if user is None or not is_staff_user(user):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned staff user not found")
+        return None
+    target_user = db.query(User).filter(User.id == user_id).first()
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+    if target_user.status != "Active":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to an inactive user account.")
+    if target_user.role.lower() not in {role.lower() for role in STAFF_ROLES}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot assign project to a non-staff user account.")
+    return target_user
 
 
 def validate_customer_reference(
@@ -197,13 +207,20 @@ def create_project(
     validate_customer_reference(db, request.customer_id, current_user)
     validate_lead_reference(db, request.source_lead_id)
 
+    requested_status = request.status if "status" in request.model_fields_set else "Planning"
+    if requested_status != "Planning":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="New projects must start in Planning status",
+        )
+
     project = Project(
         name=request.name.strip(),
         category=request.category,
         location=request.location.strip(),
         capacity=request.capacity.strip(),
         capacity_kw=request.capacity_kw,
-        status=request.status or "Planning",
+        status=requested_status,
         customer_id=request.customer_id,
         source_lead_id=request.source_lead_id,
         assigned_user_id=assigned_user_id,
@@ -237,6 +254,17 @@ def create_project(
         user_id=current_user.id,
         status_val=project.status,
     )
+
+    if project.assigned_user_id:
+        NotificationService.create_notification(
+            db=db,
+            user_id=project.assigned_user_id,
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
 
     db.commit()
     db.refresh(project)
@@ -362,11 +390,22 @@ def update_project(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    project = manageable_projects_query(db, current_user).filter(Project.id == project_id).first()
+    project = (
+        manageable_projects_query(db, current_user)
+        .filter(Project.id == project_id)
+        .with_for_update(of=Project)
+        .populate_existing()
+        .first()
+    )
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
+    old_assigned = project.assigned_user_id
     update_data = request.model_dump(exclude_unset=True)
+    changed_fields = [
+        field for field, value in update_data.items()
+        if getattr(project, field) != value
+    ]
     target_status = update_data.get("status")
 
     if (
@@ -382,7 +421,8 @@ def update_project(
         validate_customer_reference(db, update_data["customer_id"], current_user)
     if "source_lead_id" in update_data:
         validate_lead_reference(db, update_data["source_lead_id"])
-    validate_user_reference(db, update_data.get("assigned_user_id"))
+    if "assigned_user_id" in update_data:
+        validate_user_reference(db, update_data["assigned_user_id"])
 
     if target_status is not None:
         CRMService.project_transition_workflow(
@@ -397,8 +437,72 @@ def update_project(
 
     apply_project_update(project, update_data)
 
-    db.commit()
-    db.refresh(project)
+    CRMService.record_update_activity(
+        db=db,
+        entity_type="project",
+        entity_id=project.id,
+        title=f"Project updated: {project.name}",
+        changed_fields=[
+            field for field in changed_fields
+            if field not in {"status", "assigned_user_id"}
+        ],
+        customer_id=project.customer_id,
+        customer_name=project.customer.name if project.customer else None,
+        user_id=current_user.id,
+        status_val=project.status,
+    )
+    if (
+        "assigned_user_id" in update_data
+        and project.assigned_user_id != old_assigned
+    ):
+        previous_user = (
+            db.query(User).filter(User.id == old_assigned).first()
+            if old_assigned
+            else None
+        )
+        assigned_user = (
+            db.query(User).filter(User.id == project.assigned_user_id).first()
+            if project.assigned_user_id
+            else None
+        )
+        CRMService.record_activity(
+            db=db,
+            entity_type="project",
+            entity_id=project.id,
+            action="reassigned",
+            title=f"Project reassigned: {project.name}",
+            description=(
+                f"Assigned staff member changed from "
+                f"{previous_user.name if previous_user else 'Unassigned'} to "
+                f"{assigned_user.name if assigned_user else 'Unassigned'}"
+            ),
+            customer_id=project.customer_id,
+            customer_name=project.customer.name if project.customer else None,
+            user_id=current_user.id,
+            status_val=project.status,
+        )
+
+    if (
+        "assigned_user_id" in update_data
+        and update_data["assigned_user_id"]
+        and update_data["assigned_user_id"] != old_assigned
+    ):
+        NotificationService.create_notification(
+            db=db,
+            user_id=update_data["assigned_user_id"],
+            title="Project Assigned",
+            message=f"You have been assigned to project '{project.name}'.",
+            notification_type="project_assigned",
+            entity_type="project",
+            entity_id=project.id,
+        )
+
+    try:
+        db.commit()
+        db.refresh(project)
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
     return APIResponse(success=True, message="Project updated successfully", data=build_project_response(project))
 
@@ -413,7 +517,7 @@ def get_project_related_data(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    project = db.query(Project).filter(Project.id == project_id).first()
+    project = manageable_projects_query(db, current_user).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 

@@ -68,6 +68,19 @@ export const authService = {
     return unwrapData(response);
   },
 
+  async activateAccount(payload) {
+    const response = await apiRequest("/auth/activate", {
+      method: "POST",
+      body: {
+        token: payload.token,
+        password: payload.password,
+        confirm_password: payload.confirmPassword ?? payload.confirm_password,
+      },
+      auth: false,
+    });
+    return unwrapData(response);
+  },
+
   async logout() {
     try {
       await apiRequest("/auth/logout", { method: "POST" });

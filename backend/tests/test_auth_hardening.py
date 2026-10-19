@@ -1,6 +1,5 @@
 import secrets
 from datetime import datetime, timedelta, timezone
-import pytest
 from sqlalchemy.orm import Session
 import jwt
 
@@ -195,6 +194,83 @@ def test_logout_revokes_the_token(client):
     # Subsequent access using same token is rejected with 401
     revoked_res = client.get("/api/v1/auth/me", headers=headers)
     assert revoked_res.status_code == 401
+    assert revoked_res.headers["www-authenticate"] == "Bearer"
+    revoked_jti = decode_access_token(token)["jti"]
+    with Session(engine) as db:
+        assert db.query(RevokedToken).filter(RevokedToken.jti == revoked_jti).first()
+
+
+def test_missing_invalid_expired_and_revoked_credentials_return_401(client):
+    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.post("/api/v1/auth/logout").status_code == 401
+
+    invalid_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": "Bearer invalid-token"},
+    )
+    assert invalid_response.status_code == 401
+
+    missing_claim_token = jwt.encode(
+        {
+            "sub": "1",
+            "iat": int(datetime.now(timezone.utc).timestamp()),
+            "exp": int((datetime.now(timezone.utc) + timedelta(minutes=5)).timestamp()),
+            "ver": 0,
+        },
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+    )
+    missing_claim_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {missing_claim_token}"},
+    )
+    assert missing_claim_response.status_code == 401
+
+    expired_token = create_access_token(
+        subject="1",
+        expires_delta=timedelta(seconds=-1),
+    )
+    expired_response = client.get(
+        "/api/v1/auth/me",
+        headers={"Authorization": f"Bearer {expired_token}"},
+    )
+    assert expired_response.status_code == 401
+    assert expired_response.headers["www-authenticate"] == "Bearer"
+
+    # Optional authentication is anonymous only when no credential was sent;
+    # malformed credentials must not silently fall back to public access.
+    optional_auth_response = client.get(
+        "/api/v1/projects",
+        headers={"Authorization": "Bearer invalid-token"},
+    )
+    assert optional_auth_response.status_code == 401
+
+
+def test_authorization_denial_remains_403(client):
+    with Session(engine) as db:
+        user = User(
+            name="Customer User",
+            email="customer_forbidden@solara.test",
+            password_hash=get_password_hash("StrongPassword123"),
+            role="Customer",
+            status="Active",
+            token_version=0,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        token = create_access_token(
+            subject=user.id,
+            token_version=0,
+            extra_claims={"role": "Admin", "customer_id": 999999},
+        )
+
+    response = client.get(
+        "/api/v1/users",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
 
 
 def test_remember_me_expiry(client):
@@ -442,4 +518,3 @@ def test_rate_limiting_enforced(client):
     assert throttled.status_code == 429
     assert throttled.json()["error_code"] == "HTTP_429"
     limiter.reset()
-

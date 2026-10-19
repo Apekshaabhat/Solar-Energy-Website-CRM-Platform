@@ -31,6 +31,8 @@ class ProjectBase(BaseModel):
     start_date: Optional[date] = None
     completion_date: Optional[date] = None
 
+    model_config = ConfigDict(extra="forbid")
+
     @field_validator("name", "category", "location", "capacity", mode="after")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
@@ -86,6 +88,8 @@ class ProjectUpdate(BaseModel):
     actual_cost: Optional[float] = Field(default=None, ge=0, le=1_000_000_000)
     start_date: Optional[date] = None
     completion_date: Optional[date] = None
+
+    model_config = ConfigDict(extra="forbid")
 
     @field_validator("name", "location", "capacity", mode="after")
     @classmethod

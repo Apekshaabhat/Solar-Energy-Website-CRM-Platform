@@ -32,6 +32,12 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
     setIsSubmitting(true);
 
     try {
+      const session = await login({ email, password, rememberMe });
+      if (session?.user?.status && session.user.status !== "Active") {
+        throw new Error(`Your account is currently ${session.user.status}. Please contact an administrator or check your activation link.`);
+      }
+      const redirectPath = location.state?.from?.pathname || '/dashboard';
+      navigate(redirectPath, { replace: true });
       const loggedUser = await login(email, password, rememberMe);
       const targetRoute = getDefaultRouteForRole(loggedUser?.role);
       navigate(targetRoute);

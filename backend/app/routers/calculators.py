@@ -28,17 +28,27 @@ STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
 
 
 def get_or_create_settings(db: Session) -> CalculatorSettings:
-    settings_obj = db.query(CalculatorSettings).first()
+    settings_obj = db.query(CalculatorSettings).order_by(CalculatorSettings.id.asc()).first()
     if not settings_obj:
-        settings_obj = CalculatorSettings(
-            electricity_rate=8.0,
-            generation_per_kw=120.0,
-            installation_cost_per_kw=55000.0,
-            bill_offset_percent=85.0,
-        )
-        db.add(settings_obj)
-        db.commit()
-        db.refresh(settings_obj)
+        try:
+            settings_obj = CalculatorSettings(
+                electricity_rate=8.0,
+                generation_per_kw=120.0,
+                installation_cost_per_kw=55000.0,
+                bill_offset_percent=85.0,
+            )
+            db.add(settings_obj)
+            db.commit()
+            db.refresh(settings_obj)
+        except Exception:
+            db.rollback()
+            settings_obj = db.query(CalculatorSettings).order_by(CalculatorSettings.id.asc()).first()
+    else:
+        duplicates = db.query(CalculatorSettings).filter(CalculatorSettings.id != settings_obj.id).all()
+        if duplicates:
+            for dup in duplicates:
+                db.delete(dup)
+            db.commit()
     return settings_obj
 
 
@@ -221,6 +231,25 @@ def create_submission(
     )
 
 
+@router.get(
+    "/submissions/{submission_id}",
+    response_model=APIResponse[CalculatorSubmissionResponse],
+    summary="Get calculator submission details",
+)
+def get_submission(
+    submission_id: int,
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
+    sub = db.query(CalculatorSubmission).filter(CalculatorSubmission.id == submission_id).first()
+    if not sub:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Submission not found")
+
+    resp = CalculatorSubmissionResponse.model_validate(sub)
+    resp.date = sub.created_at.strftime("%Y-%m-%d") if sub.created_at else "2026-09-15"
+    return APIResponse(success=True, data=resp)
+
+
 @router.delete(
     "/submissions/{submission_id}",
     response_model=APIResponse[bool],
@@ -245,7 +274,10 @@ def delete_submission(
     response_model=APIResponse[CalculatorSettingsResponse],
     summary="Get calculation settings",
 )
-def get_calculator_settings(db: Session = Depends(get_db)):
+def get_calculator_settings(
+    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    db: Session = Depends(get_db),
+):
     settings_obj = get_or_create_settings(db)
 
     return APIResponse(
@@ -265,10 +297,7 @@ def update_calculator_settings(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    settings_obj = db.query(CalculatorSettings).first()
-    if not settings_obj:
-        settings_obj = CalculatorSettings()
-        db.add(settings_obj)
+    settings_obj = get_or_create_settings(db)
 
     update_data = request.model_dump(exclude_unset=True)
     for field, val in update_data.items():

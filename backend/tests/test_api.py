@@ -1441,6 +1441,39 @@ def test_project_status_transition_matrix_is_enforced(client):
                 assert stored_status == (target_status if transition_allowed else current_status)
 
 
+def test_project_creation_starts_in_planning_and_rejects_status_bypass(client):
+    headers = auth_headers(client, email="project-create-status@solara.test")
+    payload = {
+        "name": "New Planning Project",
+        "category": "Residential",
+        "location": "Pune",
+        "capacity": "5 kW",
+    }
+    created = client.post("/api/v1/projects", json=payload, headers=headers)
+    assert created.status_code == 201
+    assert created.json()["data"]["status"] == "Planning"
+
+    bypass = client.post(
+        "/api/v1/projects",
+        json={**payload, "name": "Completed at Creation", "status": "Completed"},
+        headers=headers,
+    )
+    assert bypass.status_code == 409
+
+    extra_create_field = client.post(
+        "/api/v1/projects",
+        json={**payload, "name": "Unexpected Field", "role": "Admin"},
+        headers=headers,
+    )
+    assert extra_create_field.status_code == 422
+    extra_update_field = client.patch(
+        f"/api/v1/projects/{created.json()['data']['id']}",
+        json={"password_hash": "not-an-approved-field"},
+        headers=headers,
+    )
+    assert extra_update_field.status_code == 422
+
+
 def test_project_status_updates_require_ownership_and_use_workflows(client):
     owner_headers = staff_headers(client, "project-status-owner@solara.test", "Sales Rep")
     other_headers = staff_headers(client, "project-status-other@solara.test", "Support")
@@ -1696,6 +1729,18 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
         f"/api/v1/projects/{other_project['id']}", headers=owner_headers
     ).status_code == 404
     assert client.get(
+        f"/api/v1/projects/{owner_project['id']}/related-data",
+        headers=owner_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}/related-data",
+        headers=owner_headers,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}/related-data",
+        headers=manager_headers,
+    ).status_code == 200
+    assert client.get(
         f"/api/v1/projects/{manager_only_project['id']}", headers=owner_headers
     ).status_code == 404
     assert client.get(
@@ -1724,6 +1769,7 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
     assert owner_list.status_code == 200
     owner_ids = {item["id"] for item in owner_list.json()["data"]}
     assert owner_project["id"] in owner_ids
+    assert public_project["id"] in owner_ids
     assert other_project["id"] not in owner_ids
     assert manager_only_project["id"] not in owner_ids
     assert client.get(

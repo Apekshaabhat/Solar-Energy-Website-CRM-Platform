@@ -16,8 +16,11 @@ class Activity(Base):
     customer_name = Column(String(150), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     status = Column(String(50), nullable=True)
+    previous_value = Column(Text, nullable=True)
+    new_value = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False, index=True)
 
     # Relationships
     customer = relationship("Customer", back_populates="activities", foreign_keys=[customer_id])
     user = relationship("User", foreign_keys=[user_id])
+

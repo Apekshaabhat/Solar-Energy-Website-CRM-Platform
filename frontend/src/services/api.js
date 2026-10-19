@@ -27,7 +27,12 @@ function buildUrl(path, params) {
 
 export function getAuthToken() {
   if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(AUTH_TOKEN_KEY);
+  return (
+    window.localStorage.getItem(AUTH_TOKEN_KEY) ||
+    window.sessionStorage.getItem(AUTH_TOKEN_KEY) ||
+    window.localStorage.getItem("solara_token") ||
+    window.sessionStorage.getItem("solara_token")
+  );
 }
 
 export function getStoredUser() {
@@ -46,12 +51,26 @@ export function setAuthSession(token, user) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(AUTH_TOKEN_KEY, token);
   window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
+  window.localStorage.setItem("solara_token", token);
+  window.localStorage.setItem("solara_user", JSON.stringify(user));
+  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  window.sessionStorage.removeItem(AUTH_USER_KEY);
+  window.sessionStorage.removeItem("solara_token");
+  window.sessionStorage.removeItem("solara_user");
 }
 
 export function clearAuthSession() {
   if (typeof window === "undefined") return;
   window.localStorage.removeItem(AUTH_TOKEN_KEY);
   window.localStorage.removeItem(AUTH_USER_KEY);
+  window.localStorage.removeItem("solara_token");
+  window.localStorage.removeItem("solara_user");
+  window.localStorage.removeItem("solara_remember");
+  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
+  window.sessionStorage.removeItem(AUTH_USER_KEY);
+  window.sessionStorage.removeItem("solara_token");
+  window.sessionStorage.removeItem("solara_user");
+  window.dispatchEvent(new Event("solara_auth_logout"));
 }
 
 export async function apiRequest(path, options = {}) {
@@ -105,7 +124,7 @@ export async function apiRequest(path, options = {}) {
   const payload = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && auth && token) {
       clearAuthSession();
     }
     throw new ApiError(
@@ -132,7 +151,7 @@ export async function downloadRequest(path, params = {}) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    if (response.status === 401) clearAuthSession();
+    if (response.status === 401 && token) clearAuthSession();
     throw new ApiError(payload?.message || payload?.detail || "File download failed", response.status, payload);
   }
 

@@ -12,6 +12,7 @@ from app.models.project import Project
 from app.models.activity import Activity
 from app.models.user import User
 from app.services.dashboard_service import format_relative_time
+from app.services.notification_service import NotificationService
 
 
 VALID_LEAD_TRANSITIONS = {
@@ -53,6 +54,8 @@ class CRMService:
         customer_name: Optional[str] = None,
         user_id: Optional[int] = None,
         status_val: Optional[str] = None,
+        previous_value: Optional[str] = None,
+        new_value: Optional[str] = None,
     ) -> Activity:
         """Create and persist an activity audit log entry."""
         activity = Activity(
@@ -65,9 +68,38 @@ class CRMService:
             customer_name=customer_name,
             user_id=user_id,
             status=status_val,
+            previous_value=previous_value,
+            new_value=new_value,
         )
         db.add(activity)
         return activity
+
+    @staticmethod
+    def record_update_activity(
+        db: Session,
+        entity_type: str,
+        entity_id: int,
+        title: str,
+        changed_fields: list[str],
+        user_id: Optional[int],
+        customer_id: Optional[int] = None,
+        customer_name: Optional[str] = None,
+        status_val: Optional[str] = None,
+    ) -> Optional[Activity]:
+        if not changed_fields:
+            return None
+        return CRMService.record_activity(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action="updated",
+            title=title,
+            description=f"Updated fields: {', '.join(changed_fields)}",
+            customer_id=customer_id,
+            customer_name=customer_name,
+            user_id=user_id,
+            status_val=status_val,
+        )
 
     @staticmethod
     def validate_lead_transition(current_status: str, target_status: str) -> None:
@@ -443,6 +475,27 @@ class CRMService:
 
         CRMService.recalculate_customer_status(db, survey.customer_id)
 
+        if survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=survey.assigned_user_id,
+                title="Site Survey Completed",
+                message=f"Site survey for {survey.customer_name} has been completed.",
+                notification_type="survey_completed",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+        if lead and lead.assigned_user_id and lead.assigned_user_id != survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=lead.assigned_user_id,
+                title="Site Survey Completed",
+                message=f"Site survey completed for {survey.customer_name}. Lead moved to Quoted.",
+                notification_type="survey_completed",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
+
         db.commit()
         db.refresh(survey)
         if lead:
@@ -560,6 +613,23 @@ class CRMService:
                     user_id=current_user.id,
                     status_val="Cancelled",
                 )
+            notified_users = set()
+            for recipient_id in (
+                survey.assigned_user_id,
+                lead.assigned_user_id if lead else None,
+            ):
+                if recipient_id is None or recipient_id in notified_users:
+                    continue
+                notified_users.add(recipient_id)
+                NotificationService.create_notification(
+                    db=db,
+                    user_id=recipient_id,
+                    title="Site Survey Cancelled",
+                    message=f"Site survey for {survey.customer_name} was cancelled.",
+                    notification_type="survey_cancelled",
+                    entity_type="site_survey",
+                    entity_id=survey.id,
+                )
 
             CRMService.recalculate_customer_status(db, survey.customer_id)
 
@@ -676,6 +746,17 @@ class CRMService:
 
         CRMService.recalculate_customer_status(db, customer.id)
 
+        if project.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=project.assigned_user_id,
+                title="Project Created",
+                message=f"Project '{project.name}' initialized from converted lead.",
+                notification_type="project_created",
+                entity_type="project",
+                entity_id=project.id,
+            )
+
         db.commit()
         db.refresh(lead)
         db.refresh(project)
@@ -786,6 +867,17 @@ class CRMService:
                 user_id=user_id,
                 status_val=target_status,
             )
+
+            if project.assigned_user_id:
+                NotificationService.create_notification(
+                    db=db,
+                    user_id=project.assigned_user_id,
+                    title="Project Status Updated",
+                    message=f"Project '{project.name}' moved to {target_status}.",
+                    notification_type="project_status",
+                    entity_type="project",
+                    entity_id=project.id,
+                )
 
             if target_status in {"In Progress", "Completed", "Cancelled"}:
                 CRMService.recalculate_customer_status(db, project.customer_id)

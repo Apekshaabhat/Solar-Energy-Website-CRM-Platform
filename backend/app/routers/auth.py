@@ -11,6 +11,7 @@ from app.schemas.auth import (
     Token,
     LoginRequest,
     RegisterRequest,
+    ActivateAccountRequest,
     ForgotPasswordRequest,
     ResetPasswordRequest,
     ActivateRequest,
@@ -43,6 +44,22 @@ def register(
         message="Registration request submitted. Your account is pending administrator approval.",
         data=None,
     )
+
+
+@router.post(
+    "/activate",
+    response_model=APIResponse[UserResponse],
+    summary="Activate invited user account",
+    description="Validates single-use expiring invitation token and sets the initial account password.",
+)
+def activate(request: ActivateAccountRequest, db: Session = Depends(get_db)):
+    user = AuthService.activate_account(db, request)
+    return APIResponse(
+        success=True,
+        message="Account activated successfully. You may now log in.",
+        data=UserResponse.model_validate(user),
+    )
+
 
 
 @router.post(
