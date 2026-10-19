@@ -8,10 +8,17 @@ import StatusBadge from "../../components/dashboard/StatusBadge";
 import Pagination from "../../components/dashboard/Pagination";
 import Modal from "../../components/dashboard/Modal";
 import { FormField, TextInput, SelectInput } from "../../components/dashboard/FormField";
-import { surveyTabOrder } from "../../data/dashboardData";
 import { todayISO } from "../../utils/dashboardDate";
 import { siteSurveysApi } from "../../api/siteSurveys";
 import { useDashboardData } from "../../context/DashboardDataContext";
+
+const surveyTabOrder = [
+  "All Surveys",
+  "Scheduled",
+  "In Progress",
+  "Completed",
+  "Cancelled",
+];
 
 const tabFilterMap = {
   "All Surveys": null,

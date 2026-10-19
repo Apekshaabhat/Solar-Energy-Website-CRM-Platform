@@ -1,6 +1,6 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from jwt import PyJWTError
@@ -23,7 +23,6 @@ from app.schemas.auth import (
     LoginRequest,
     ChangePasswordRequest,
     ProfileUpdateRequest,
-    ActivateAccountRequest,
 )
 
 from app.services.crm_service import CRMService
@@ -58,10 +57,7 @@ class AuthService:
         email_clean = request.email.lower().strip()
         existing = db.query(User).filter(User.email == email_clean).first()
         if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="A user with this email address already exists.",
-            )
+            return None
 
         # Enforce Customer role unconditionally for public signup
         role = "Customer"
@@ -174,51 +170,83 @@ class AuthService:
         return admin_user
 
     @staticmethod
-    def activate_account(db: Session, request: ActivateAccountRequest) -> User:
+    def activate_account(
+        db: Session,
+        request: Any,
+        password: Optional[str] = None,
+        confirm_password: Optional[str] = None,
+    ) -> User:
         """
         Secure activation and password-setup flow for invited users.
         Verifies cryptographically secure single-use expiring token.
         """
-        if request.password != request.confirm_password:
+        if isinstance(request, str):
+            token = request
+            pwd = password or ""
+            conf_pwd = confirm_password
+        else:
+            token = getattr(request, "token", "") or ""
+            pwd = getattr(request, "password", "") or (password or "")
+            conf_pwd = getattr(request, "confirm_password", None) or confirm_password
+
+        if conf_pwd is not None and pwd != conf_pwd:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="New password and confirmation password do not match.",
             )
 
-        token_hash = hashlib.sha256(request.token.encode("utf-8")).hexdigest()
-        user = db.query(User).filter(User.invitation_token_hash == token_hash).first()
-
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired invitation token.",
-            )
-
         now = datetime.now(timezone.utc)
-        if user.invitation_expires_at is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invitation token is invalid.",
+        token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+        # Check PasswordResetToken first (token_type='activate')
+        token_rec = (
+            db.query(PasswordResetToken)
+            .filter(
+                PasswordResetToken.token_hash == token_hash,
+                PasswordResetToken.token_type == "activate",
+                PasswordResetToken.used_at.is_(None),
             )
+            .first()
+        )
 
-        expires_at = user.invitation_expires_at
-        if expires_at.tzinfo is None:
-            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        user = None
+        if token_rec:
+            exp = token_rec.expires_at
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=timezone.utc)
+            if exp < now:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invitation token has expired. Please contact an administrator.",
+                )
+            user = db.query(User).filter(User.id == token_rec.user_id).first()
+            token_rec.used_at = now
 
-        if expires_at < now:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invitation token has expired. Please contact an administrator.",
-            )
+        # Fallback to User.invitation_token_hash
+        if not user:
+            user = db.query(User).filter(User.invitation_token_hash == token_hash).first()
+            if not user:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid or expired invitation token.",
+                )
+            if user.invitation_expires_at is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invitation token is invalid.",
+                )
+            expires_at = user.invitation_expires_at
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < now:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invitation token has expired. Please contact an administrator.",
+                )
 
-        if user.status != "Invited":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Account is not in an invited state or has already been activated.",
-            )
-
-        user.password_hash = get_password_hash(request.password)
+        user.password_hash = get_password_hash(pwd)
         user.status = "Active"
+        user.token_version = (user.token_version or 0) + 1
         user.invitation_token_hash = None
         user.invitation_expires_at = None
 
@@ -282,6 +310,18 @@ class AuthService:
         if user.locked_until and ensure_utc(user.locked_until) > now:
             raise generic_error
 
+        if user.status == "Invited":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is pending activation. Please use the activation link sent to your email.",
+            )
+
+        if user.status == "Inactive":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="User account is deactivated or inactive.",
+            )
+
         # Verify password
         if not verify_password(request.password, user.password_hash):
             user.failed_attempts = (user.failed_attempts or 0) + 1
@@ -292,6 +332,11 @@ class AuthService:
 
         # User is active check - reject non-Active users with same generic error
         if user.status != "Active":
+            if user.status == "Inactive":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="User account is deactivated or inactive.",
+                )
             raise generic_error
 
         # Successful authentication: reset failed attempts and unlock
@@ -434,44 +479,6 @@ class AuthService:
             )
 
         user.password_hash = get_password_hash(new_password)
-        user.token_version = (user.token_version or 0) + 1
-        record.used_at = now
-        db.commit()
-        return True
-
-    @staticmethod
-    def activate_account(db: Session, token: str, password: str) -> bool:
-        """
-        Activate user account after verifying invitation/activation token.
-        Sets password, status="Active", increments token_version, marks token used.
-        """
-        now = datetime.now(timezone.utc)
-        token_sha256 = hash_token(token)
-
-        record = (
-            db.query(PasswordResetToken)
-            .filter(
-                PasswordResetToken.token_hash == token_sha256,
-                PasswordResetToken.token_type == "activate",
-            )
-            .first()
-        )
-
-        if not record or record.used_at is not None or ensure_utc(record.expires_at) < now:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid, expired, or already used activation token",
-            )
-
-        user = db.query(User).filter(User.id == record.user_id).first()
-        if not user:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="User account not found",
-            )
-
-        user.password_hash = get_password_hash(password)
-        user.status = "Active"
         user.token_version = (user.token_version or 0) + 1
         record.used_at = now
         db.commit()

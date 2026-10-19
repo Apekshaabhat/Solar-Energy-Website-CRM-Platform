@@ -1,7 +1,18 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+import {
+  BASE_URL,
+  getToken,
+  setToken,
+  getStoredUser as clientGetStoredUser,
+  setStoredUser as clientSetStoredUser,
+  clearAuth,
+  ALT_TOKEN_KEY,
+  ALT_USER_KEY,
+} from "../api/client";
 
-export const AUTH_TOKEN_KEY = "solara-auth-token";
-export const AUTH_USER_KEY = "solara-auth-user";
+export const API_BASE_URL = BASE_URL;
+
+export const AUTH_TOKEN_KEY = ALT_TOKEN_KEY;
+export const AUTH_USER_KEY = ALT_USER_KEY;
 
 export class ApiError extends Error {
   constructor(message, status, details = null) {
@@ -26,51 +37,20 @@ function buildUrl(path, params) {
 }
 
 export function getAuthToken() {
-  if (typeof window === "undefined") return null;
-  return (
-    window.localStorage.getItem(AUTH_TOKEN_KEY) ||
-    window.sessionStorage.getItem(AUTH_TOKEN_KEY) ||
-    window.localStorage.getItem("solara_token") ||
-    window.sessionStorage.getItem("solara_token")
-  );
+  return getToken();
 }
 
 export function getStoredUser() {
-  if (typeof window === "undefined") return null;
-  const raw = window.localStorage.getItem(AUTH_USER_KEY);
-  if (!raw) return null;
-
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
+  return clientGetStoredUser();
 }
 
-export function setAuthSession(token, user) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(AUTH_TOKEN_KEY, token);
-  window.localStorage.setItem(AUTH_USER_KEY, JSON.stringify(user));
-  window.localStorage.setItem("solara_token", token);
-  window.localStorage.setItem("solara_user", JSON.stringify(user));
-  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
-  window.sessionStorage.removeItem(AUTH_USER_KEY);
-  window.sessionStorage.removeItem("solara_token");
-  window.sessionStorage.removeItem("solara_user");
+export function setAuthSession(token, user, rememberMe = true) {
+  setToken(token, rememberMe);
+  clientSetStoredUser(user);
 }
 
 export function clearAuthSession() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem(AUTH_TOKEN_KEY);
-  window.localStorage.removeItem(AUTH_USER_KEY);
-  window.localStorage.removeItem("solara_token");
-  window.localStorage.removeItem("solara_user");
-  window.localStorage.removeItem("solara_remember");
-  window.sessionStorage.removeItem(AUTH_TOKEN_KEY);
-  window.sessionStorage.removeItem(AUTH_USER_KEY);
-  window.sessionStorage.removeItem("solara_token");
-  window.sessionStorage.removeItem("solara_user");
-  window.dispatchEvent(new Event("solara_auth_logout"));
+  clearAuth();
 }
 
 export async function apiRequest(path, options = {}) {

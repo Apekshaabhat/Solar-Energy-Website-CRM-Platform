@@ -55,7 +55,6 @@ def get_current_user(
     if is_revoked:
         raise _credentials_exception()
 
-    # Load fresh user from database on every request
     user = db.query(User).filter(User.id == user_id).first()
     if user is None or user.status != "Active":
         raise _credentials_exception()

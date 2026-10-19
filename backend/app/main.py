@@ -46,16 +46,33 @@ logger = logging.getLogger("solara_api")
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Checking SOLARA API database connection...")
-    with engine.connect() as connection:
-        connection.execute(text("SELECT 1"))
-    logger.info("Database connection established.")
-
-    db = SessionLocal()
     try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully.")
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        logger.info("Database connection established.")
     except Exception as e:
-        logger.error(f"Error initializing database: {e}")
+        logger.critical(f"Database connection failure during startup: {e}")
+        raise RuntimeError(f"Database connection failed: {e}") from e
+
+    # Apply database schema migrations
+    try:
+        import os
+        from alembic.config import Config
+        from alembic import command
+        backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        alembic_ini_path = os.path.join(backend_dir, "alembic.ini")
+        if os.path.exists(alembic_ini_path) and "sqlite" not in settings.DATABASE_URL:
+            alembic_cfg = Config(alembic_ini_path)
+            alembic_cfg.set_main_option("script_location", os.path.join(backend_dir, "migrations"))
+            alembic_cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+            command.upgrade(alembic_cfg, "head")
+            logger.info("Database migrations successfully applied to head.")
+        else:
+            Base.metadata.create_all(bind=engine)
+            logger.info("Database tables verified.")
+    except Exception as e:
+        logger.critical(f"Database schema initialization failure: {e}")
+        raise RuntimeError(f"Database schema initialization failed: {e}") from e
 
     # Cleanup of expired tokens at startup
     try:
@@ -67,12 +84,16 @@ async def lifespan(app: FastAPI):
             logger.info("Cleaned up expired rows in revoked_tokens and password_reset_tokens.")
     except Exception as e:
         logger.warning(f"Error cleaning up expired tokens at startup: {e}")
-        if db.query(User).count() == 0:
-            logger.info("No users found. Running default seed data for local development.")
-            from seed import seed_data
-            seed_data()
-    finally:
-        db.close()
+
+    # Seed initial data if empty
+    try:
+        with Session(engine) as db:
+            if db.query(User).count() == 0 and "sqlite" not in settings.DATABASE_URL:
+                logger.info("No users found. Running default seed data for development.")
+                from seed import seed_data
+                seed_data()
+    except Exception as e:
+        logger.warning(f"Error running seed data on empty database: {e}")
 
     yield
     # Shutdown

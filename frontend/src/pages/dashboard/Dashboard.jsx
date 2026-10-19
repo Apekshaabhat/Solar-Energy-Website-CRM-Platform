@@ -8,9 +8,15 @@ import RecentLeads from "../../components/dashboard/RecentLeads";
 import QuickActions from "../../components/dashboard/QuickActions";
 import RecentActivity from "../../components/dashboard/RecentActivity";
 import PromoBanner from "../../components/dashboard/PromoBanner";
-import { statCards as defaultStatCards } from "../../data/dashboardData";
 import { dashboardApi } from "../../api/dashboard";
 import { useDashboardData } from "../../context/DashboardDataContext";
+
+const zeroCards = [
+  { id: "total-leads", title: "Total Leads", value: "0", change: "0%", isPositive: true },
+  { id: "site-surveys", title: "Site Surveys", value: "0", change: "0%", isPositive: true },
+  { id: "ongoing-projects", title: "Ongoing Projects", value: "0", change: "0%", isPositive: true },
+  { id: "completed-projects", title: "Completed Projects", value: "0", change: "0%", isPositive: true },
+];
 
 const cardRouteMap = {
   "total-leads": "/dashboard/leads",
@@ -52,7 +58,7 @@ export default function Dashboard() {
     loadDashboard();
   }, [refreshToken]);
 
-  const cards = summary?.statCards || summary?.stats || defaultStatCards;
+  const cards = summary?.statCards || summary?.stats || zeroCards;
 
   return (
     <div className="space-y-6">
