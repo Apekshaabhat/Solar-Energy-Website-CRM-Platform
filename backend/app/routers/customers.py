@@ -293,7 +293,22 @@ def update_my_customer_profile(
 ):
     customer = get_linked_customer(db, current_user)
     update_data = request.model_dump(exclude_unset=True)
+    changed_fields = [
+        field for field, value in update_data.items()
+        if getattr(customer, field) != value
+    ]
     apply_customer_update(customer, update_data)
+    CRMService.record_update_activity(
+        db=db,
+        entity_type="customer",
+        entity_id=customer.id,
+        title=f"Customer profile updated: {customer.name}",
+        changed_fields=changed_fields,
+        customer_id=customer.id,
+        customer_name=customer.name,
+        user_id=current_user.id,
+        status_val=customer.status,
+    )
     db.commit()
     db.refresh(customer)
     resp = CustomerResponse.model_validate(customer)
@@ -399,6 +414,8 @@ def get_customer_projects(
 )
 def get_customer_activities(
     customer_id: int,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
     current_user: User = Depends(require_roles(ALL_ROLES)),
     db: Session = Depends(get_db),
 ):
@@ -407,7 +424,14 @@ def get_customer_activities(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user)
 
-    activities = db.query(Activity).filter(Activity.customer_id == customer_id).order_by(desc(Activity.created_at)).all()
+    activities = (
+        db.query(Activity)
+        .filter(Activity.customer_id == customer_id)
+        .order_by(desc(Activity.created_at), desc(Activity.id))
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
     items = []
     for a in activities:
         r = ActivityResponse.model_validate(a)
@@ -467,6 +491,10 @@ def update_customer(
         validate_user_reference(db, update_data.get("assigned_user_id"))
 
     old_status = customer.status
+    changed_fields = [
+        field for field, value in update_data.items()
+        if getattr(customer, field) != value
+    ]
     if "account_user_id" in update_data and not is_customer_manager(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -498,6 +526,18 @@ def update_customer(
             user_id=current_user.id,
             status_val=customer.status,
         )
+
+    CRMService.record_update_activity(
+        db=db,
+        entity_type="customer",
+        entity_id=customer.id,
+        title=f"Customer updated: {customer.name}",
+        changed_fields=[field for field in changed_fields if field != "status"],
+        customer_id=customer.id,
+        customer_name=customer.name,
+        user_id=current_user.id,
+        status_val=customer.status,
+    )
 
     db.commit()
     db.refresh(customer)

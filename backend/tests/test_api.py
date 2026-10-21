@@ -1,13 +1,21 @@
-from sqlalchemy.orm import Session
-from app.core.database import engine
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 
-from app.core.security import create_access_token
-from app.core.database import SessionLocal
+import pytest
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from app.core.database import SessionLocal, engine
+from app.core.security import create_access_token, get_password_hash
+from app.models.activity import Activity
 from app.models.customer import Customer
 from app.models.lead import Lead
 from app.models.project import Project
+from app.models.settings import SystemSettings
+from app.models.site_survey import SiteSurvey
 from app.models.user import User
+from app.services.crm_service import CRMService
+
 from .conftest import auth_headers
 
 
@@ -93,6 +101,109 @@ def test_register_login_and_me(client):
     assert me.json()["data"]["name"] == "Asha Rao"
 
 
+def test_my_profile_returns_authenticated_user_and_persists_updates(client):
+    headers = auth_headers(client, email="my-profile@solara.test")
+
+    profile = client.get("/api/v1/auth/me", headers=headers)
+    assert profile.status_code == 200
+    profile_data = profile.json()["data"]
+    assert profile_data["email"] == "my-profile@solara.test"
+    assert profile_data["name"] == "Solara Admin"
+    assert not {"password_hash", "access_token", "token_version", "failed_attempts"} & profile_data.keys()
+
+    updated = client.patch(
+        "/api/v1/auth/profile",
+        json={
+            "name": "Updated Profile Name",
+            "email": "updated-profile@solara.test",
+            "phone": "  +1 555 0100  ",
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["success"] is True
+    assert updated.json()["data"]["name"] == "Updated Profile Name"
+    assert updated.json()["data"]["email"] == "updated-profile@solara.test"
+    assert updated.json()["data"]["phone"] == "+1 555 0100"
+
+    reloaded = client.get("/api/v1/auth/me", headers=headers)
+    assert reloaded.status_code == 200
+    assert reloaded.json()["data"]["email"] == "updated-profile@solara.test"
+    assert reloaded.json()["data"]["name"] == "Updated Profile Name"
+    assert reloaded.json()["data"]["phone"] == "+1 555 0100"
+    assert not {"password_hash", "access_token", "token_version", "failed_attempts"} & reloaded.json()["data"].keys()
+
+    with SessionLocal() as db:
+        persisted = db.query(User).filter(User.email == "updated-profile@solara.test").one()
+        assert persisted.name == "Updated Profile Name"
+        assert persisted.phone == "+1 555 0100"
+
+
+def test_my_profile_rejects_unauthorized_invalid_and_protected_updates(client):
+    headers = auth_headers(client, email="my-profile-protected@solara.test")
+    assert client.get("/api/v1/auth/me").status_code == 401
+    assert client.patch(
+        "/api/v1/auth/profile",
+        json={"name": "Not Authorized"},
+    ).status_code == 401
+    nonexistent_user_headers = {
+        "Authorization": f"Bearer {create_access_token('999999')}"
+    }
+    assert client.get(
+        "/api/v1/auth/me",
+        headers=nonexistent_user_headers,
+    ).status_code == 401
+    assert client.patch(
+        "/api/v1/auth/profile",
+        json={"name": "Not Authorized"},
+        headers=nonexistent_user_headers,
+    ).status_code == 401
+
+    assert client.patch(
+        "/api/v1/auth/profile",
+        json={"name": "   "},
+        headers=headers,
+    ).status_code == 422
+    assert client.patch(
+        "/api/v1/auth/profile",
+        json={"email": "not-an-email"},
+        headers=headers,
+    ).status_code == 422
+
+    protected_update = client.patch(
+        "/api/v1/auth/profile",
+        json={
+            "id": 999999,
+            "role": "Admin",
+            "status": "Inactive",
+            "password_hash": "attacker-controlled",
+            "token_version": 99,
+        },
+        headers=headers,
+    )
+    assert protected_update.status_code == 422
+
+    with SessionLocal() as db:
+        persisted = db.query(User).filter(User.email == "my-profile-protected@solara.test").one()
+        assert persisted.role == "Admin"
+        assert persisted.status == "Active"
+        assert persisted.token_version == 0
+        assert persisted.password_hash != "attacker-controlled"
+
+
+def test_my_profile_rejects_duplicate_email(client):
+    owner_headers = auth_headers(client, email="my-profile-email-owner@solara.test")
+    auth_headers(client, email="my-profile-email-taken@solara.test")
+
+    response = client.patch(
+        "/api/v1/auth/profile",
+        json={"email": "my-profile-email-taken@solara.test"},
+        headers=owner_headers,
+    )
+    assert response.status_code == 400
+    assert response.json()["success"] is False
+
+
 def test_forgot_password_is_not_reported_as_sent_when_unconfigured(client):
     response = client.post(
         "/api/v1/auth/forgot-password",
@@ -154,6 +265,445 @@ def test_staff_dashboard_apis_require_valid_authentication(client):
     for path in paths:
         response = client.get(path, headers=authenticated_headers)
         assert response.status_code == 200, path
+
+
+def test_survey_cancellation_rejects_repeat_invalid_and_unassigned_staff(client):
+    owner_headers = staff_headers(client, "survey-cancel-owner@solara.test", "Sales Rep")
+    other_headers = staff_headers(client, "survey-cancel-other@solara.test", "Support")
+    admin_headers = auth_headers(client, email="survey-cancel-admin@solara.test")
+    manager_headers = staff_headers(client, "survey-cancel-manager@solara.test", "Manager")
+
+    with Session(engine) as db:
+        owner_id = db.query(User.id).filter(User.email == "survey-cancel-owner@solara.test").scalar()
+        customer = Customer(name="Survey Customer", contact="123", location="Pune")
+        db.add(customer)
+        db.flush()
+        lead = Lead(
+            name="Survey Lead",
+            contact="123",
+            location="Pune",
+            status="Site Survey",
+            assigned_user_id=owner_id,
+            customer_id=customer.id,
+        )
+        db.add(lead)
+        db.flush()
+        scheduled_survey = SiteSurvey(
+            customer_name=customer.name,
+            location=customer.location,
+            survey_date="2026-10-20",
+            time_slot="10:00 AM",
+            assigned_to="Owner",
+            status="Scheduled",
+            notes="Customer requested the survey",
+            updated_at=datetime(2000, 1, 1, tzinfo=timezone.utc),
+            customer_id=customer.id,
+            lead_id=lead.id,
+            assigned_user_id=owner_id,
+        )
+        completed_survey = SiteSurvey(
+            customer_name="Completed Customer",
+            location="Pune",
+            survey_date="2026-10-20",
+            time_slot="11:00 AM",
+            assigned_to="Owner",
+            status="Completed",
+            assigned_user_id=owner_id,
+        )
+        in_progress_survey = SiteSurvey(
+            customer_name="In Progress Customer",
+            location="Pune",
+            survey_date="2026-10-20",
+            time_slot="12:00 PM",
+            assigned_to="Owner",
+            status="In Progress",
+            assigned_user_id=owner_id,
+        )
+        db.add_all([scheduled_survey, completed_survey, in_progress_survey])
+        db.commit()
+        scheduled_id = scheduled_survey.id
+        completed_id = completed_survey.id
+        in_progress_id = in_progress_survey.id
+        lead_id = lead.id
+        customer_id = customer.id
+
+    unauthenticated = client.post(f"/api/v1/site-surveys/{scheduled_id}/cancel")
+    assert unauthenticated.status_code == 401
+
+    unauthorized = client.post(
+        f"/api/v1/site-surveys/{scheduled_id}/cancel",
+        headers=other_headers,
+    )
+    assert unauthorized.status_code == 404
+
+    cancelled = client.post(
+        f"/api/v1/site-surveys/{scheduled_id}/cancel",
+        headers=owner_headers,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["data"]["status"] == "Cancelled"
+    assert cancelled.json()["data"]["notes"] == "Customer requested the survey"
+
+    manager_cancelled = client.post(
+        f"/api/v1/site-surveys/{in_progress_id}/cancel",
+        headers=manager_headers,
+    )
+    assert manager_cancelled.status_code == 200
+    assert manager_cancelled.json()["data"]["status"] == "Cancelled"
+
+    repeated = client.post(
+        f"/api/v1/site-surveys/{scheduled_id}/cancel",
+        headers=admin_headers,
+    )
+    assert repeated.status_code == 409
+
+    completed = client.post(
+        f"/api/v1/site-surveys/{completed_id}/cancel",
+        headers=admin_headers,
+    )
+    assert completed.status_code == 400
+
+    with Session(engine) as db:
+        assert db.query(Lead.status).filter(Lead.id == lead_id).scalar() == "Cancelled"
+        assert db.query(Customer.status).filter(Customer.id == customer_id).scalar() == "Inactive"
+        assert db.query(SiteSurvey.status).filter(SiteSurvey.id == scheduled_id).scalar() == "Cancelled"
+        assert (
+            db.query(SiteSurvey.updated_at).filter(SiteSurvey.id == scheduled_id).scalar().year
+            > 2000
+        )
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "site_survey", Activity.entity_id == scheduled_id)
+            .count()
+            == 1
+        )
+
+
+def test_survey_cancellation_rolls_back_when_customer_recalculation_fails(client, monkeypatch):
+    auth_headers(client, email="survey-cancel-rollback@solara.test")
+    with Session(engine) as db:
+        user = db.query(User).filter(User.email == "survey-cancel-rollback@solara.test").first()
+        customer = Customer(name="Rollback Customer", contact="321", location="Pune")
+        db.add(customer)
+        db.flush()
+        lead = Lead(
+            name="Rollback Lead",
+            contact="321",
+            location="Pune",
+            status="Site Survey",
+            customer_id=customer.id,
+            assigned_user_id=user.id,
+        )
+        db.add(lead)
+        db.flush()
+        survey = SiteSurvey(
+            customer_name=customer.name,
+            location=customer.location,
+            survey_date="2026-10-21",
+            time_slot="10:00 AM",
+            assigned_to="Admin",
+            status="Scheduled",
+            customer_id=customer.id,
+            lead_id=lead.id,
+            assigned_user_id=user.id,
+        )
+        db.add(survey)
+        db.commit()
+        user_id = user.id
+        survey_id = survey.id
+        lead_id = lead.id
+
+    def fail_customer_recalculation(_db, _customer_id):
+        raise RuntimeError("injected customer recalculation failure")
+
+    monkeypatch.setattr(
+        CRMService,
+        "recalculate_customer_status",
+        staticmethod(fail_customer_recalculation),
+    )
+    with Session(engine) as db:
+        user = db.query(User).filter(User.id == user_id).one()
+        with pytest.raises(RuntimeError, match="injected customer recalculation failure"):
+            CRMService.site_survey_cancel_workflow(db, survey_id, user)
+
+    with Session(engine) as db:
+        assert db.query(SiteSurvey.status).filter(SiteSurvey.id == survey_id).scalar() == "Scheduled"
+        assert db.query(Lead.status).filter(Lead.id == lead_id).scalar() == "Site Survey"
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "site_survey", Activity.entity_id == survey_id)
+            .count()
+            == 0
+        )
+
+
+def test_concurrent_survey_cancellation_is_serialized(client):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL row-lock behavior requires the PostgreSQL test backend")
+
+    auth_headers(client, email="survey-cancel-concurrency@solara.test")
+    with Session(engine) as db:
+        user_id = db.query(User.id).filter(User.email == "survey-cancel-concurrency@solara.test").scalar()
+        survey = SiteSurvey(
+            customer_name="Concurrent Customer",
+            location="Pune",
+            survey_date="2026-10-22",
+            time_slot="10:00 AM",
+            assigned_to="Admin",
+            status="Scheduled",
+            assigned_user_id=user_id,
+        )
+        db.add(survey)
+        db.commit()
+        survey_id = survey.id
+
+    def cancel_once():
+        with Session(engine) as db:
+            user = db.query(User).filter(User.id == user_id).one()
+            try:
+                CRMService.site_survey_cancel_workflow(db, survey_id, user)
+                return 200
+            except HTTPException as exc:
+                return exc.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: cancel_once(), range(2)))
+
+    assert sorted(results) == [200, 409]
+    with Session(engine) as db:
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "site_survey", Activity.entity_id == survey_id)
+            .count()
+            == 1
+        )
+
+
+def test_dashboard_summary_scopes_metrics_and_activities_by_assignment(client):
+    admin_headers = auth_headers(client, email="dashboard-scope-admin@solara.test")
+    manager_headers = staff_headers(client, "dashboard-scope-manager@solara.test", "Manager")
+    owner_headers = staff_headers(client, "dashboard-scope-owner@solara.test", "Sales Rep")
+    other_headers = staff_headers(client, "dashboard-scope-other@solara.test", "Support")
+
+    with Session(engine) as db:
+        owner_id = db.query(User.id).filter(User.email == "dashboard-scope-owner@solara.test").scalar()
+        other_id = db.query(User.id).filter(User.email == "dashboard-scope-other@solara.test").scalar()
+        customer_user = User(
+            name="Dashboard Customer",
+            email="dashboard-scope-customer@solara.test",
+            password_hash=get_password_hash("StrongPass123"),
+            role="Customer",
+            status="Active",
+        )
+        db.add(customer_user)
+        db.flush()
+
+        owner_customer = Customer(
+            name="Owner Customer",
+            contact="111",
+            location="Pune",
+            assigned_user_id=owner_id,
+        )
+        other_customer = Customer(
+            name="Other Customer",
+            contact="222",
+            location="Mumbai",
+            assigned_user_id=other_id,
+            account_user_id=customer_user.id,
+        )
+        unassigned_customer = Customer(
+            name="Unassigned Customer",
+            contact="555",
+            location="Delhi",
+        )
+        db.add_all([owner_customer, other_customer, unassigned_customer])
+        db.flush()
+
+        owner_lead = Lead(
+            name="Owner Lead",
+            contact="333",
+            location="Pune",
+            status="New",
+            estimated_value=100.0,
+            assigned_user_id=owner_id,
+            customer_id=owner_customer.id,
+        )
+        other_lead = Lead(
+            name="Other Lead",
+            contact="444",
+            location="Mumbai",
+            status="Lost",
+            estimated_value=900.0,
+            assigned_user_id=other_id,
+            customer_id=other_customer.id,
+        )
+        unassigned_lead = Lead(
+            name="Unassigned Lead",
+            contact="666",
+            location="Delhi",
+            status="Contacted",
+            estimated_value=500.0,
+            customer_id=unassigned_customer.id,
+        )
+        owner_survey = SiteSurvey(
+            customer_name=owner_customer.name,
+            location="Pune",
+            survey_date="2026-10-10",
+            time_slot="10:00 AM",
+            assigned_to="Owner",
+            status="Scheduled",
+            customer_id=owner_customer.id,
+            assigned_user_id=owner_id,
+        )
+        other_survey = SiteSurvey(
+            customer_name=other_customer.name,
+            location="Mumbai",
+            survey_date="2026-10-10",
+            time_slot="11:00 AM",
+            assigned_to="Other",
+            status="Completed",
+            customer_id=other_customer.id,
+            assigned_user_id=other_id,
+        )
+        unassigned_survey = SiteSurvey(
+            customer_name=unassigned_customer.name,
+            location="Delhi",
+            survey_date="2026-10-10",
+            time_slot="12:00 PM",
+            assigned_to="Unassigned",
+            status="In Progress",
+            customer_id=unassigned_customer.id,
+        )
+        owner_project = Project(
+            name="Owner Project",
+            category="Residential",
+            location="Pune",
+            capacity="5 kW",
+            status="Completed",
+            customer_id=owner_customer.id,
+            assigned_user_id=owner_id,
+            is_public=False,
+            actual_cost=300.0,
+        )
+        other_project = Project(
+            name="Other Project",
+            category="Residential",
+            location="Mumbai",
+            capacity="6 kW",
+            status="In Progress",
+            customer_id=other_customer.id,
+            assigned_user_id=other_id,
+            is_public=False,
+            estimated_cost=800.0,
+        )
+        unassigned_project = Project(
+            name="Unassigned Project",
+            category="Residential",
+            location="Delhi",
+            capacity="7 kW",
+            status="Planning",
+            customer_id=unassigned_customer.id,
+            is_public=False,
+            estimated_cost=700.0,
+        )
+        db.add_all(
+            [
+                owner_lead,
+                other_lead,
+                unassigned_lead,
+                owner_survey,
+                other_survey,
+                unassigned_survey,
+                owner_project,
+                other_project,
+                unassigned_project,
+            ]
+        )
+        db.flush()
+        db.add_all(
+            [
+                Activity(
+                    entity_type="lead",
+                    entity_id=owner_lead.id,
+                    action="created",
+                    title="Owner lead activity",
+                ),
+                Activity(
+                    entity_type="lead",
+                    entity_id=other_lead.id,
+                    action="created",
+                    title="Other lead activity",
+                ),
+                Activity(
+                    entity_type="lead",
+                    entity_id=unassigned_lead.id,
+                    action="created",
+                    title="Unassigned lead activity",
+                ),
+            ]
+        )
+        customer_user_id = customer_user.id
+        db.commit()
+
+    owner_summary_response = client.get("/api/v1/dashboard/summary", headers=owner_headers)
+    assert owner_summary_response.status_code == 200
+    owner_summary = owner_summary_response.json()
+    assert owner_summary["metrics"]["totalLeads"] == 1
+    assert owner_summary["metrics"]["newLeads"] == 1
+    assert owner_summary["metrics"]["lostLeads"] == 0
+    assert owner_summary["metrics"]["totalCustomers"] == 1
+    assert owner_summary["metrics"]["totalSurveys"] == 1
+    assert owner_summary["metrics"]["scheduledSurveys"] == 1
+    assert owner_summary["metrics"]["completedSurveys"] == 0
+    assert owner_summary["metrics"]["completedProjects"] == 1
+    assert owner_summary["metrics"]["ongoingProjects"] == 0
+    assert owner_summary["metrics"]["estimatedPipelineValue"] == 100.0
+    assert owner_summary["metrics"]["projectRevenue"] == 300.0
+    assert [lead["name"] for lead in owner_summary["recentLeads"]] == ["Owner Lead"]
+    assert {activity["title"] for activity in owner_summary["recentActivity"]} == {
+        "Owner lead activity"
+    }
+    owner_activities = client.get("/api/v1/dashboard/activities", headers=owner_headers)
+    assert owner_activities.status_code == 200
+    assert {activity["title"] for activity in owner_activities.json()["data"]} == {
+        "Owner lead activity"
+    }
+
+    manager_summary_response = client.get("/api/v1/dashboard/summary", headers=manager_headers)
+    assert manager_summary_response.status_code == 200
+    manager_metrics = manager_summary_response.json()["metrics"]
+    assert manager_metrics["lostLeads"] == 1
+    assert manager_metrics["contactedLeads"] == 1
+    assert manager_metrics["totalLeads"] == 3
+    assert manager_metrics["totalCustomers"] == 3
+    assert manager_metrics["totalSurveys"] == 3
+    assert manager_metrics["completedSurveys"] == 1
+    assert manager_metrics["completedProjects"] == 1
+    assert manager_metrics["ongoingProjects"] == 2
+    assert manager_metrics["estimatedPipelineValue"] == 600.0
+    assert manager_metrics["projectRevenue"] == 300.0
+    assert {activity["title"] for activity in manager_summary_response.json()["recentActivity"]} == {
+        "Owner lead activity",
+        "Other lead activity",
+        "Unassigned lead activity",
+    }
+
+    admin_summary_response = client.get("/api/v1/dashboard/summary", headers=admin_headers)
+    assert admin_summary_response.status_code == 200
+    assert admin_summary_response.json()["metrics"] == manager_metrics
+
+    assert client.get("/api/v1/dashboard/summary", headers=other_headers).json()["metrics"]["totalLeads"] == 1
+    customer_token = create_access_token(customer_user_id)
+    customer_dashboard = client.get(
+        "/api/v1/dashboard/summary",
+        headers={"Authorization": f"Bearer {customer_token}"},
+    )
+    assert customer_dashboard.status_code == 403
+    assert client.get("/api/v1/dashboard/summary").status_code == 401
+    assert client.get(
+        "/api/v1/dashboard/summary",
+        headers={"Authorization": "Bearer invalid-token"},
+    ).status_code == 401
 
 
 def test_public_lead_submission_and_staff_lead_management(client):
@@ -835,6 +1385,232 @@ def test_customer_project_survey_and_dashboard_summary(client):
     assert stat_cards["completed-projects"] == "1"
 
 
+def test_project_status_transition_matrix_is_enforced(client):
+    admin_headers = auth_headers(client, email="project-transition-admin@solara.test")
+    route_by_target = {
+        "In Progress": "start",
+        "On Hold": "hold",
+        "Completed": "complete",
+        "Cancelled": "cancel",
+    }
+    allowed = {
+        "Planning": {"In Progress", "Cancelled"},
+        "In Progress": {"Completed", "On Hold", "Cancelled"},
+        "On Hold": {"In Progress", "Cancelled"},
+        "Completed": set(),
+        "Cancelled": set(),
+    }
+    states = ["Planning", "In Progress", "On Hold", "Completed", "Cancelled"]
+
+    with Session(engine) as db:
+        admin_id = db.query(User.id).filter(User.email == "project-transition-admin@solara.test").scalar()
+
+    for current_status in states:
+        for target_status in states:
+            with Session(engine) as db:
+                project = Project(
+                    name=f"{current_status} to {target_status}",
+                    category="Residential",
+                    location="Pune",
+                    capacity="5 kW",
+                    status=current_status,
+                    assigned_user_id=admin_id,
+                    is_public=False,
+                )
+                db.add(project)
+                db.commit()
+                project_id = project.id
+
+            response = client.post(
+                f"/api/v1/projects/{project_id}/{route_by_target[target_status]}",
+                headers=admin_headers,
+            )
+            transition_allowed = (
+                current_status == target_status
+                or target_status in allowed[current_status]
+            )
+            assert response.status_code == (200 if transition_allowed else 409), (
+                current_status,
+                target_status,
+                response.text,
+            )
+            with Session(engine) as db:
+                stored_status = db.query(Project.status).filter(Project.id == project_id).scalar()
+                assert stored_status == (target_status if transition_allowed else current_status)
+
+
+def test_project_creation_starts_in_planning_and_rejects_status_bypass(client):
+    headers = auth_headers(client, email="project-create-status@solara.test")
+    payload = {
+        "name": "New Planning Project",
+        "category": "Residential",
+        "location": "Pune",
+        "capacity": "5 kW",
+    }
+    created = client.post("/api/v1/projects", json=payload, headers=headers)
+    assert created.status_code == 201
+    assert created.json()["data"]["status"] == "Planning"
+
+    bypass = client.post(
+        "/api/v1/projects",
+        json={**payload, "name": "Completed at Creation", "status": "Completed"},
+        headers=headers,
+    )
+    assert bypass.status_code == 409
+
+    extra_create_field = client.post(
+        "/api/v1/projects",
+        json={**payload, "name": "Unexpected Field", "role": "Admin"},
+        headers=headers,
+    )
+    assert extra_create_field.status_code == 422
+    extra_update_field = client.patch(
+        f"/api/v1/projects/{created.json()['data']['id']}",
+        json={"password_hash": "not-an-approved-field"},
+        headers=headers,
+    )
+    assert extra_update_field.status_code == 422
+
+
+def test_project_status_updates_require_ownership_and_use_workflows(client):
+    owner_headers = staff_headers(client, "project-status-owner@solara.test", "Sales Rep")
+    other_headers = staff_headers(client, "project-status-other@solara.test", "Support")
+    with Session(engine) as db:
+        owner_id = db.query(User.id).filter(User.email == "project-status-owner@solara.test").scalar()
+        project = Project(
+            name="Owned project status test",
+            category="Residential",
+            location="Pune",
+            capacity="5 kW",
+            status="Planning",
+            assigned_user_id=owner_id,
+            is_public=False,
+        )
+        db.add(project)
+        db.commit()
+        project_id = project.id
+
+    assert client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"status": "Completed"},
+        headers=owner_headers,
+    ).status_code == 409
+    assert client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"status": "Not a project status"},
+        headers=owner_headers,
+    ).status_code == 422
+    assert client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"status": "In Progress", "name": "Validated transition"},
+        headers=other_headers,
+    ).status_code == 404
+
+    updated = client.patch(
+        f"/api/v1/projects/{project_id}",
+        json={"status": "In Progress", "name": "Validated transition"},
+        headers=owner_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["data"]["status"] == "In Progress"
+    assert updated.json()["data"]["name"] == "Validated transition"
+    with Session(engine) as db:
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "project", Activity.entity_id == project_id)
+            .count()
+            == 1
+        )
+
+    assert client.post(f"/api/v1/projects/{project_id}/hold").status_code == 401
+
+
+def test_concurrent_project_transition_is_serialized(client):
+    if engine.dialect.name != "postgresql":
+        pytest.skip("PostgreSQL row-lock behavior requires the PostgreSQL test backend")
+
+    auth_headers(client, email="project-transition-concurrency@solara.test")
+    with Session(engine) as db:
+        user = db.query(User).filter(User.email == "project-transition-concurrency@solara.test").one()
+        project = Project(
+            name="Concurrent transition",
+            category="Residential",
+            location="Pune",
+            capacity="5 kW",
+            status="Planning",
+            assigned_user_id=user.id,
+            is_public=False,
+        )
+        db.add(project)
+        db.commit()
+        project_id = project.id
+        user_id = user.id
+
+    def start_once():
+        with Session(engine) as db:
+            try:
+                CRMService.project_start_workflow(db, project_id, user_id)
+                return 200
+            except HTTPException as exc:
+                return exc.status_code
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: start_once(), range(2)))
+
+    assert sorted(results) == [200, 409]
+    with Session(engine) as db:
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "project", Activity.entity_id == project_id)
+            .count()
+            == 1
+        )
+
+
+def test_project_transition_rolls_back_if_customer_recalculation_fails(client, monkeypatch):
+    admin_headers = auth_headers(client, email="project-transition-rollback@solara.test")
+    with Session(engine) as db:
+        admin_id = db.query(User.id).filter(User.email == "project-transition-rollback@solara.test").scalar()
+        customer = Customer(name="Transition rollback customer", contact="123", location="Pune")
+        db.add(customer)
+        db.flush()
+        project = Project(
+            name="Transition rollback project",
+            category="Residential",
+            location="Pune",
+            capacity="5 kW",
+            status="In Progress",
+            customer_id=customer.id,
+            assigned_user_id=admin_id,
+            is_public=False,
+        )
+        db.add(project)
+        db.commit()
+        project_id = project.id
+
+    def fail_recalculation(_db, _customer_id):
+        raise RuntimeError("injected customer recalculation failure")
+
+    monkeypatch.setattr(
+        CRMService,
+        "recalculate_customer_status",
+        staticmethod(fail_recalculation),
+    )
+    response = client.post(
+        f"/api/v1/projects/{project_id}/complete",
+        headers=admin_headers,
+    )
+    assert response.status_code == 500
+    with Session(engine) as db:
+        assert db.query(Project.status).filter(Project.id == project_id).scalar() == "In Progress"
+        assert (
+            db.query(Activity.id)
+            .filter(Activity.entity_type == "project", Activity.entity_id == project_id)
+            .count()
+            == 0
+        )
+
+
 def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
     admin_headers = auth_headers(client, email="project-auth-admin@solara.test")
     manager_headers = staff_headers(client, "project-auth-manager@solara.test", "Manager")
@@ -953,6 +1729,18 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
         f"/api/v1/projects/{other_project['id']}", headers=owner_headers
     ).status_code == 404
     assert client.get(
+        f"/api/v1/projects/{owner_project['id']}/related-data",
+        headers=owner_headers,
+    ).status_code == 200
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}/related-data",
+        headers=owner_headers,
+    ).status_code == 404
+    assert client.get(
+        f"/api/v1/projects/{other_project['id']}/related-data",
+        headers=manager_headers,
+    ).status_code == 200
+    assert client.get(
         f"/api/v1/projects/{manager_only_project['id']}", headers=owner_headers
     ).status_code == 404
     assert client.get(
@@ -981,6 +1769,7 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
     assert owner_list.status_code == 200
     owner_ids = {item["id"] for item in owner_list.json()["data"]}
     assert owner_project["id"] in owner_ids
+    assert public_project["id"] in owner_ids
     assert other_project["id"] not in owner_ids
     assert manager_only_project["id"] not in owner_ids
     assert client.get(
@@ -1089,7 +1878,7 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
         f"/api/v1/projects/{other_project['id']}", headers=owner_headers
     ).status_code == 200
     assert client.get(
-        f"/api/v1/projects/999999", headers=manager_headers
+        "/api/v1/projects/999999", headers=manager_headers
     ).status_code == 404
     assert client.patch(
         "/api/v1/projects/999999", json={"name": "Missing"}, headers=manager_headers
@@ -1141,6 +1930,97 @@ def test_calculator_submission_public_create_staff_manage_settings(client):
     )
     assert updated_settings.status_code == 200
     assert updated_settings.json()["data"]["electricity_rate"] == 9.5
+
+
+def test_system_settings_defaults_updates_and_persist_across_requests(client):
+    admin_headers = auth_headers(client, email="system-settings-admin@solara.test")
+    manager_headers = staff_headers(client, "system-settings-manager@solara.test", "Manager")
+
+    defaults = client.get("/api/v1/settings", headers=admin_headers)
+    assert defaults.status_code == 200
+    assert defaults.json()["data"]["company_name"] == "SOLARA Energy Solutions"
+    assert defaults.json()["data"]["email_notifications"] is True
+
+    updated = client.put(
+        "/api/v1/settings",
+        json={
+            "company_name": "  Solara Workspace  ",
+            "support_email": "CARE@SOLARA.TEST",
+            "email_notifications": False,
+            "sms_notifications": True,
+            "lead_alerts": False,
+            "two_factor_auth": True,
+        },
+        headers=manager_headers,
+    )
+    assert updated.status_code == 200
+    assert updated.json()["success"] is True
+    assert updated.json()["data"]["company_name"] == "Solara Workspace"
+    assert updated.json()["data"]["support_email"] == "care@solara.test"
+    assert updated.json()["data"]["sms_notifications"] is True
+
+    refreshed = client.get("/api/v1/settings", headers=admin_headers)
+    assert refreshed.status_code == 200
+    for field, expected in {
+        "company_name": "Solara Workspace",
+        "support_email": "care@solara.test",
+        "email_notifications": False,
+        "sms_notifications": True,
+        "lead_alerts": False,
+        "two_factor_auth": True,
+    }.items():
+        assert refreshed.json()["data"][field] == expected
+
+    with SessionLocal() as db:
+        settings_rows = db.query(SystemSettings).all()
+        assert len(settings_rows) == 1
+        assert settings_rows[0].company_name == "Solara Workspace"
+        assert settings_rows[0].two_factor_auth is True
+
+
+def test_system_settings_reject_invalid_and_unapproved_fields(client):
+    headers = auth_headers(client, email="system-settings-validation@solara.test")
+    assert client.get("/api/v1/settings", headers=headers).status_code == 200
+
+    invalid_updates = [
+        {"company_name": "   "},
+        {"support_email": "not-an-email"},
+        {"email_notifications": "false"},
+        {"sms_notifications": 1},
+        {"two_factor_auth": True, "user_id": 12345},
+        {"id": 2},
+        {"updated_at": "2026-01-01T00:00:00Z"},
+    ]
+    for update in invalid_updates:
+        response = client.put("/api/v1/settings", json=update, headers=headers)
+        assert response.status_code == 422, (update, response.text)
+
+    unchanged = client.get("/api/v1/settings", headers=headers)
+    assert unchanged.json()["data"]["company_name"] == "SOLARA Energy Solutions"
+    assert unchanged.json()["data"]["lead_alerts"] is True
+
+
+def test_system_settings_require_existing_admin_or_manager_authorization(client):
+    manager_headers = staff_headers(client, "system-settings-authorized-manager@solara.test", "Manager")
+    staff_user_headers = staff_headers(client, "system-settings-unauthorized-staff@solara.test", "Sales Rep")
+    assert client.get("/api/v1/settings", headers=manager_headers).status_code == 200
+
+    assert client.get("/api/v1/settings").status_code == 401
+    assert client.put(
+        "/api/v1/settings",
+        json={"two_factor_auth": True},
+    ).status_code == 401
+    assert client.get("/api/v1/settings", headers=staff_user_headers).status_code == 403
+    denied_update = client.put(
+        "/api/v1/settings",
+        json={"company_name": "Unauthorized Workspace", "two_factor_auth": True},
+        headers=staff_user_headers,
+    )
+    assert denied_update.status_code == 403
+
+    persisted = client.get("/api/v1/settings", headers=manager_headers)
+    assert persisted.json()["data"]["company_name"] == "SOLARA Energy Solutions"
+    assert persisted.json()["data"]["two_factor_auth"] is False
 
 
 def test_frontend_service_contracts_for_admin_resources(client):

@@ -14,10 +14,10 @@ let isRedirectingToLogin = false;
 export function getToken() {
   if (typeof window === "undefined") return null;
   return (
-    localStorage.getItem(TOKEN_KEY) ||
-    sessionStorage.getItem(TOKEN_KEY) ||
-    localStorage.getItem(ALT_TOKEN_KEY) ||
-    sessionStorage.getItem(ALT_TOKEN_KEY) ||
+    window.localStorage.getItem(TOKEN_KEY) ||
+    window.sessionStorage.getItem(TOKEN_KEY) ||
+    window.localStorage.getItem(ALT_TOKEN_KEY) ||
+    window.sessionStorage.getItem(ALT_TOKEN_KEY) ||
     null
   );
 }
@@ -25,6 +25,9 @@ export function getToken() {
 export function setToken(token, rememberMe = false) {
   if (typeof window === "undefined") return;
   if (token) {
+    isRedirectingToLogin = false;
+    localStorage.removeItem("solara-auth-token");
+    sessionStorage.removeItem("solara-auth-token");
     if (rememberMe) {
       localStorage.setItem(TOKEN_KEY, token);
       localStorage.setItem(ALT_TOKEN_KEY, token);
@@ -50,10 +53,10 @@ export function setToken(token, rememberMe = false) {
 export function getStoredUser() {
   if (typeof window === "undefined") return null;
   const user =
-    localStorage.getItem(USER_KEY) ||
-    sessionStorage.getItem(USER_KEY) ||
-    localStorage.getItem(ALT_USER_KEY) ||
-    sessionStorage.getItem(ALT_USER_KEY);
+    window.localStorage.getItem(USER_KEY) ||
+    window.sessionStorage.getItem(USER_KEY) ||
+    window.localStorage.getItem(ALT_USER_KEY) ||
+    window.sessionStorage.getItem(ALT_USER_KEY);
   try {
     return user ? JSON.parse(user) : null;
   } catch (e) {
@@ -64,6 +67,8 @@ export function getStoredUser() {
 export function setStoredUser(user) {
   if (typeof window === "undefined") return;
   if (user) {
+    localStorage.removeItem("solara-auth-user");
+    sessionStorage.removeItem("solara-auth-user");
     const isRemembered = localStorage.getItem(REMEMBER_KEY) === "true";
     const serialized = JSON.stringify(user);
     if (isRemembered) {
@@ -100,16 +105,12 @@ export function clearAuth() {
 }
 
 function handleSessionExpired() {
+  if (isRedirectingToLogin) return;
+  isRedirectingToLogin = true;
+  sessionStorage.setItem("auth_redirect_message", "Your session has expired, please sign in again.");
   clearAuth();
-  if (!isRedirectingToLogin) {
-    isRedirectingToLogin = true;
-    sessionStorage.setItem("auth_redirect_message", "Your session has expired, please sign in again.");
-    if (window.location.pathname !== "/login") {
-      window.location.href = "/login";
-    }
-    setTimeout(() => {
-      isRedirectingToLogin = false;
-    }, 2000);
+  if (window.location.pathname !== "/login") {
+    window.location.replace("/login");
   }
 }
 
@@ -173,7 +174,7 @@ export async function apiClient(endpoint, options = {}) {
     throw error;
   }
 
-  if (response.status === 401 && !isLoginRequest) {
+  if (response.status === 401 && !isLoginRequest && token) {
     handleSessionExpired();
     const err = new Error("Your session has expired, please sign in again.");
     err.status = 401;

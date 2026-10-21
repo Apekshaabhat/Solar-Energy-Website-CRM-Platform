@@ -1,7 +1,9 @@
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Optional
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from jwt import PyJWTError
 import secrets
 from fastapi import HTTPException, status
 from app.core.config import settings
@@ -15,18 +17,24 @@ from app.core.security import (
 )
 from app.models.user import User
 from app.models.customer import Customer
-from app.core.security import get_password_hash, verify_password, create_access_token
 from app.models.token import RevokedToken, PasswordResetToken
 from app.schemas.auth import (
     RegisterRequest,
     LoginRequest,
     ChangePasswordRequest,
     ProfileUpdateRequest,
-    ActivateAccountRequest,
 )
 
 from app.services.crm_service import CRMService
 from app.services.email_service import EmailService
+
+
+def _credentials_exception() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -81,7 +89,7 @@ class AuthService:
             email=email_clean,
             password_hash=get_password_hash(request.password),
             phone=request.phone.strip() if request.phone else None,
-            role="Customer",
+            role=role,
             status="Pending",
             token_version=0,
             failed_attempts=0,
@@ -100,7 +108,7 @@ class AuthService:
             description=f"Public registration completed for {user.email}",
             customer_id=customer_id,
             customer_name=user.name,
-            status_val="Active",
+            status_val=user.status,
         )
 
         db.commit()
@@ -356,7 +364,7 @@ class AuthService:
             subject=user.id,
             expires_delta=expires_delta,
             extra_claims=extra_claims,
-            token_version=user.token_version,
+            token_version=user.token_version or 0,
         )
 
         return {
@@ -378,26 +386,20 @@ class AuthService:
         """Revoke a token by storing its jti claim in revoked_tokens table."""
         try:
             payload = decode_access_token(token)
-            jti = payload.get("jti")
-            exp = payload.get("exp")
-            if not jti:
-                return True
+        except PyJWTError:
+            raise _credentials_exception()
 
-            expires_at = (
-                datetime.fromtimestamp(exp, timezone.utc)
-                if exp
-                else datetime.now(timezone.utc) + timedelta(hours=settings.ACCESS_TOKEN_EXPIRE_HOURS)
-            )
-
-            existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
-            if not existing:
-                revoked = RevokedToken(jti=jti, expires_at=expires_at)
-                db.add(revoked)
+        jti = payload["jti"]
+        expires_at = datetime.fromtimestamp(payload["exp"], timezone.utc)
+        existing = db.query(RevokedToken).filter(RevokedToken.jti == jti).first()
+        if not existing:
+            try:
+                db.add(RevokedToken(jti=jti, expires_at=expires_at))
                 db.commit()
-            return True
-        except Exception:
-            # Even if token is already expired or malformed, succeed gracefully
-            return True
+            except SQLAlchemyError:
+                db.rollback()
+                raise
+        return True
 
     @staticmethod
     def update_password(db: Session, user: User, request: ChangePasswordRequest) -> bool:
@@ -484,21 +486,25 @@ class AuthService:
 
     @staticmethod
     def update_profile(db: Session, user: User, request: ProfileUpdateRequest) -> User:
-        if request.email and request.email.lower().strip() != user.email.lower():
-            target_email = request.email.lower().strip()
-            existing = db.query(User).filter(User.email == target_email).first()
-            if existing and existing.id != user.id:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email address is already in use by another account",
-                )
-            user.email = target_email
+        try:
+            if request.email and request.email.lower().strip() != user.email.lower():
+                target_email = request.email.lower().strip()
+                existing = db.query(User).filter(User.email == target_email).first()
+                if existing and existing.id != user.id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email address is already in use by another account",
+                    )
+                user.email = target_email
 
-        if request.name:
-            user.name = request.name.strip()
-        if request.phone is not None:
-            user.phone = request.phone.strip() if request.phone else None
+            if request.name is not None:
+                user.name = request.name
+            if request.phone is not None:
+                user.phone = request.phone or None
 
-        db.commit()
-        db.refresh(user)
+            db.commit()
+            db.refresh(user)
+        except SQLAlchemyError:
+            db.rollback()
+            raise
         return user

@@ -86,11 +86,9 @@ def create_access_token(
 
 def decode_access_token(token: str) -> dict:
     """Decode and validate a JWT access token."""
-    return jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
-
     return jwt.decode(
         token,
         settings.SECRET_KEY,
         algorithms=[settings.ALGORITHM],
-        options={"require": ["sub", "iat", "exp"]},
+        options={"require": ["sub", "iat", "exp", "jti", "ver"]},
     )

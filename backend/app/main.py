@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime, timezone
 from contextlib import asynccontextmanager
+from typing import Any, Mapping, Optional
 from fastapi import FastAPI, Request, status
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
@@ -12,10 +13,12 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 
-from app.core.config import settings
-from app.core.database import SessionLocal, engine, Base
+from app.core.database import Base, SessionLocal, engine
 from app.core.limiter import limiter
 from app.models.token import RevokedToken, PasswordResetToken
+from sqlalchemy import text
+
+from app.core.config import settings
 from app.models.user import User
 import app.models  # ensure models are registered
 
@@ -146,89 +149,127 @@ app.add_middleware(
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(
+    return _error_response(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        content={
-            "success": False,
-            "message": f"Rate limit exceeded: {exc.detail}",
-            "error_code": "HTTP_429",
-            "details": None,
-        },
+        message="Rate limit exceeded. Please try again later.",
+        error_code="HTTP_429",
     )
 
 
 # Centralized Exception Handlers
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+def _error_code_for_status(status_code: int) -> str:
+    return {
+        status.HTTP_400_BAD_REQUEST: "BAD_REQUEST",
+        status.HTTP_401_UNAUTHORIZED: "UNAUTHORIZED",
+        status.HTTP_403_FORBIDDEN: "FORBIDDEN",
+        status.HTTP_404_NOT_FOUND: "NOT_FOUND",
+        status.HTTP_409_CONFLICT: "CONFLICT",
+        status.HTTP_422_UNPROCESSABLE_ENTITY: "VALIDATION_ERROR",
+    }.get(status_code, f"HTTP_{status_code}")
+
+
+def _error_response(
+    status_code: int,
+    message: str,
+    error_code: str,
+    details: Any = None,
+    headers: Optional[Mapping[str, str]] = None,
+) -> JSONResponse:
     return JSONResponse(
-        status_code=exc.status_code,
+        status_code=status_code,
+        headers=headers,
         content={
             "success": False,
-            "message": exc.detail,
-            "error_code": f"HTTP_{exc.status_code}",
-            "details": None,
+            "message": message,
+            "error_code": error_code,
+            "details": details,
         },
+    )
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        message = "An unexpected server error occurred."
+        error_code = "INTERNAL_SERVER_ERROR"
+    elif isinstance(exc.detail, str):
+        message = exc.detail
+        error_code = _error_code_for_status(exc.status_code)
+    else:
+        message = "The request could not be processed."
+        error_code = _error_code_for_status(exc.status_code)
+
+    return _error_response(
+        status_code=exc.status_code,
+        message=message,
+        error_code=error_code,
+        headers=exc.headers,
     )
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    errors = []
-    for err in exc.errors():
-        field = " -> ".join(str(x) for x in err.get("loc", []))
-        msg = err.get("msg", "Invalid value")
-        errors.append(f"{field}: {msg}")
-    
-    return JSONResponse(
+    # Pydantic error objects may include the submitted input, so expose only
+    # field locations and error types in the public response.
+    errors = [
+        {
+            "location": error.get("loc", []),
+            "message": "Invalid value.",
+            "type": error.get("type", "value_error"),
+        }
+        for error in exc.errors()
+    ]
+    return _error_response(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={
-            "success": False,
-            "message": "Input validation error: " + "; ".join(errors),
-            "error_code": "VALIDATION_ERROR",
-            "details": jsonable_encoder(exc.errors()),
-        },
+        message="Input validation error.",
+        error_code="VALIDATION_ERROR",
+        details=jsonable_encoder(errors),
     )
 
 
 @app.exception_handler(IntegrityError)
 async def integrity_error_handler(request: Request, exc: IntegrityError):
-    logger.error(f"Database Integrity Error: {exc}")
-    return JSONResponse(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        content={
-            "success": False,
-            "message": "A database constraint violation occurred (e.g., duplicate record or invalid reference).",
-            "error_code": "INTEGRITY_ERROR",
-            "details": None,
-        },
+    logger.error(
+        "Database integrity constraint failed for %s %s (%s)",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
+    return _error_response(
+        status_code=status.HTTP_409_CONFLICT,
+        message="The requested change conflicts with existing data.",
+        error_code="CONFLICT",
     )
 
 
 @app.exception_handler(SQLAlchemyError)
 async def sqlalchemy_error_handler(request: Request, exc: SQLAlchemyError):
-    logger.error(f"Database Error: {exc}")
-    return JSONResponse(
+    logger.error(
+        "Database operation failed for %s %s (%s)",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+    )
+    return _error_response(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "success": False,
-            "message": "An internal database error occurred. Please try again later.",
-            "error_code": "DATABASE_ERROR",
-            "details": None,
-        },
+        message="An internal database error occurred. Please try again later.",
+        error_code="DATABASE_ERROR",
     )
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Unhandled Exception on {request.method} {request.url.path}: {exc}", exc_info=True)
-    return JSONResponse(
+    logger.error(
+        "Unhandled exception for %s %s (%s)",
+        request.method,
+        request.url.path,
+        type(exc).__name__,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
+    return _error_response(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={
-            "success": False,
-            "message": "An unexpected server error occurred.",
-            "error_code": "INTERNAL_SERVER_ERROR",
-            "details": None,
-        },
+        message="An unexpected server error occurred.",
+        error_code="INTERNAL_SERVER_ERROR",
     )
 
 
