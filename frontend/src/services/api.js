@@ -104,7 +104,7 @@ export async function apiRequest(path, options = {}) {
   const payload = text ? JSON.parse(text) : null;
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && auth && token) {
       clearAuthSession();
     }
     throw new ApiError(
@@ -131,7 +131,7 @@ export async function downloadRequest(path, params = {}) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
-    if (response.status === 401) clearAuthSession();
+    if (response.status === 401 && token) clearAuthSession();
     throw new ApiError(payload?.message || payload?.detail || "File download failed", response.status, payload);
   }
 

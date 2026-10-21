@@ -1,29 +1,80 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Search, Bell, Sun, Moon, X } from "lucide-react";
 import { useTheme } from "../../context/ThemeContext";
+import notificationsApi from "../../api/notifications";
 import ProfileDropdown from "./ProfileDropdown";
-
-const initialNotifications = [
-  { id: 1, title: "New lead added", message: "Rohan Patil was created from the website form.", time: "2 min ago", read: false },
-  { id: 2, title: "Site survey updated", message: "Sneha Sharma moved to completed status.", time: "18 min ago", read: false },
-  { id: 3, title: "Project reminder", message: "Green Valley Residence needs a review today.", time: "1 hour ago", read: true },
-];
 
 export default function Topbar({ searchPlaceholder = "Search leads, customers, projects..." }) {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState(initialNotifications);
+  const [items, setItems] = useState([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadError, setLoadError] = useState("");
 
-  const unreadCount = useMemo(
-    () => items.filter((item) => !item.read).length,
-    [items]
-  );
+  const loadNotifications = useCallback(async (markRead = false) => {
+    setLoading(true);
+    setLoadError("");
+    try {
+      const [notifications, unread] = await Promise.all([
+        notificationsApi.getNotifications({ limit: 20 }),
+        notificationsApi.getUnreadCount(),
+      ]);
+      const page = notifications || [];
+      setItems(page.map((item) => ({
+        ...item,
+        read: item.is_read,
+      })));
+      setHasMore(page.length === 20);
+      setUnreadCount(unread?.unread_count || 0);
+
+      if (markRead && unread?.unread_count > 0) {
+        await notificationsApi.markAllRead();
+        setItems((current) => current.map((item) => ({ ...item, read: true, is_read: true })));
+        setUnreadCount(0);
+      }
+    } catch (error) {
+      setLoadError(error.message || "Unable to load notifications.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  async function handleLoadMore() {
+    setLoadingMore(true);
+    setLoadError("");
+    try {
+      const page = await notificationsApi.getNotifications({
+        limit: 20,
+        offset: items.length,
+      });
+      setItems((current) => {
+        const knownIds = new Set(current.map((item) => item.id));
+        const newItems = (page || [])
+          .filter((item) => !knownIds.has(item.id))
+          .map((item) => ({ ...item, read: item.is_read }));
+        return [...current, ...newItems];
+      });
+      setHasMore((page || []).length === 20);
+    } catch (error) {
+      setLoadError(error.message || "Unable to load more notifications.");
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  useEffect(() => {
+    loadNotifications();
+  }, [loadNotifications]);
 
   function handleToggleNotifications() {
-    setOpen((prev) => !prev);
-    if (!open) {
-      setItems((prev) => prev.map((item) => ({ ...item, read: true })));
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    if (nextOpen) {
+      loadNotifications(true);
     }
   }
 
@@ -84,7 +135,13 @@ export default function Topbar({ searchPlaceholder = "Search leads, customers, p
               </div>
 
               <div className="max-h-80 overflow-y-auto">
-                {items.map((item) => (
+                {loading ? (
+                  <p className="px-4 py-6 text-center text-xs text-ink-500">Loading notifications...</p>
+                ) : loadError ? (
+                  <p role="alert" className="px-4 py-6 text-center text-xs text-red-600">{loadError}</p>
+                ) : items.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-ink-500">You have no notifications.</p>
+                ) : items.map((item) => (
                   <div key={item.id} className={`border-b border-line px-4 py-3 last:border-b-0 ${item.read ? "opacity-75" : "bg-[#f7faf7] dark:bg-[#0f1a14]"}`}>
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -96,6 +153,16 @@ export default function Topbar({ searchPlaceholder = "Search leads, customers, p
                     <p className="mt-2 text-[11px] text-ink-500 dark:text-[#8A968C]">{item.time}</p>
                   </div>
                 ))}
+                {!loading && !loadError && hasMore && (
+                  <button
+                    type="button"
+                    onClick={handleLoadMore}
+                    disabled={loadingMore}
+                    className="w-full px-4 py-3 text-xs font-medium text-leaf-700 hover:bg-[#f4f6f4] disabled:opacity-60 dark:text-leaf-400 dark:hover:bg-[#0E1712]"
+                  >
+                    {loadingMore ? "Loading..." : "Load more"}
+                  </button>
+                )}
               </div>
             </div>
           )}

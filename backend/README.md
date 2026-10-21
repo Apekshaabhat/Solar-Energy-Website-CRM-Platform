@@ -48,7 +48,7 @@ python seed.py
 
 The seed admin login is `admin@solara.com` and uses the password configured in `SEED_ADMIN_PASSWORD`. The seed script generates unknown random passwords for other sample users.
 - Seed admin account: `admin@solara.com` / `admin123`
-- Database tables populated: `users`, `customers`, `leads`, `site_surveys`, `projects`, `activities`, `blogs`, `faqs`, `system_settings`.
+- Database tables populated: `users`, `customers`, `leads`, `site_surveys`, `projects`, `activities`, `notifications`, `blogs`, `faqs`, `system_settings`.
 
 ---
 ## Customer account profiles
@@ -81,7 +81,18 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `GET` | `/api/v1/customers/{id}/overview` | Returns Customer 360 view with all linked leads, surveys, projects, and chronological activities |
 | `GET` | `/api/v1/dashboard/activities` | Returns real-time activity audit feed |
 | `GET` | `/api/v1/dashboard/summary` | Dynamic dashboard statistics calculated directly via database aggregations |
+| `GET` | `/api/v1/notifications?limit=20&offset=0` | Returns the authenticated user's notifications, with a maximum page size of 100 |
+| `GET` | `/api/v1/notifications/unread-count` | Returns the authenticated user's unread notification count |
+| `PATCH` | `/api/v1/notifications/mark-all-read` | Persists read state for the authenticated user's active notifications |
+| `PATCH` | `/api/v1/notifications/{id}/read` | Persists read state only for a notification owned by the authenticated user |
+| `DELETE` | `/api/v1/notifications/{id}` | Dismisses only a notification owned by the authenticated user |
 | `GET` | `/api/v1/site-surveys/export` | Exports filtered site surveys as CSV |
+
+Dashboard activity is restricted to authenticated staff and scoped to the records assigned to each staff member; administrators and managers see the full staff activity feed. Notification listing supports bounded `limit` and `offset` pagination and all read/dismiss operations are owner-scoped.
+
+## API error responses
+
+Errors use the existing envelope with `success: false`, a user-facing `message`, a stable `error_code`, and optional `details`. Authentication, authorization, missing-resource, and conflict errors use HTTP 401, 403, 404, and 409; application-level invalid requests use 400. FastAPI request-schema validation retains its standard 422 status for frontend compatibility and omits submitted values from error details. Integrity conflicts return 409, while database and unexpected server errors return a generic 500 message without exposing internal exception details.
 
 ---
 

@@ -312,6 +312,10 @@ def update_lead(
 
     old_status = lead.status
     update_data = request.model_dump(exclude_unset=True)
+    changed_fields = [
+        field for field, value in update_data.items()
+        if getattr(lead, field) != value
+    ]
     target_status = update_data.get("status")
 
     if target_status and target_status != old_status:
@@ -363,6 +367,20 @@ def update_lead(
 
     validate_customer_reference(db, update_data.get("customer_id"))
     apply_lead_update(lead, update_data)
+    CRMService.record_update_activity(
+        db=db,
+        entity_type="lead",
+        entity_id=lead.id,
+        title=f"Lead updated: {lead.name}",
+        changed_fields=[
+            field for field in changed_fields
+            if field not in {"status", "assigned_user_id"}
+        ],
+        customer_id=lead.customer_id,
+        customer_name=lead.name,
+        user_id=current_user.id,
+        status_val=lead.status,
+    )
 
     db.commit()
     db.refresh(lead)
@@ -565,5 +583,4 @@ def delete_lead(
     db.delete(lead)
     db.commit()
     return APIResponse(success=True, message="Lead deleted successfully", data=True)
-
 

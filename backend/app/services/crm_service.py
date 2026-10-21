@@ -1,14 +1,16 @@
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 
+from app.dependencies.auth import STAFF_ROLE_SET
 from app.models.lead import Lead
 from app.models.customer import Customer
 from app.models.site_survey import SiteSurvey
 from app.models.project import Project
 from app.models.activity import Activity
+from app.models.user import User
 from app.services.dashboard_service import format_relative_time
 from app.services.notification_service import NotificationService
 
@@ -73,6 +75,33 @@ class CRMService:
         return activity
 
     @staticmethod
+    def record_update_activity(
+        db: Session,
+        entity_type: str,
+        entity_id: int,
+        title: str,
+        changed_fields: list[str],
+        user_id: Optional[int],
+        customer_id: Optional[int] = None,
+        customer_name: Optional[str] = None,
+        status_val: Optional[str] = None,
+    ) -> Optional[Activity]:
+        if not changed_fields:
+            return None
+        return CRMService.record_activity(
+            db=db,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            action="updated",
+            title=title,
+            description=f"Updated fields: {', '.join(changed_fields)}",
+            customer_id=customer_id,
+            customer_name=customer_name,
+            user_id=user_id,
+            status_val=status_val,
+        )
+
+    @staticmethod
     def validate_lead_transition(current_status: str, target_status: str) -> None:
         """Enforce strict sequential lead transitions and reject arbitrary jumping."""
         if current_status == target_status:
@@ -104,7 +133,7 @@ class CRMService:
         allowed = VALID_PROJECT_TRANSITIONS.get(current_status, [])
         if target_status not in allowed:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=status.HTTP_409_CONFLICT,
                 detail=f"Invalid project transition from '{current_status}' to '{target_status}'. Allowed: {allowed}",
             )
 
@@ -475,87 +504,144 @@ class CRMService:
         return {"survey": survey, "lead": lead}
 
     @staticmethod
-    def site_survey_cancel_workflow(db: Session, survey_id: int, user_id: Optional[int] = None) -> Dict[str, Any]:
+    def site_survey_cancel_workflow(db: Session, survey_id: int, current_user: User) -> Dict[str, Any]:
         """
         Cancel Site Survey (soft transition without physical DB row deletion).
         If related lead was in 'Site Survey', visibly updates lead to 'Cancelled'.
         Recalculates customer status.
         """
-        survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
-        if not survey:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
+        try:
+            role = current_user.role.lower()
+            if role not in STAFF_ROLE_SET:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Operation not permitted",
+                )
 
-        CRMService.validate_survey_transition(survey.status, "Cancelled")
+            survey_query = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id)
+            if role not in {"admin", "manager"}:
+                survey_query = survey_query.filter(
+                    SiteSurvey.assigned_user_id == current_user.id
+                )
+            survey = survey_query.with_for_update().first()
+            if not survey:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Site survey not found",
+                )
+            if survey.status == "Cancelled":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Site survey is already cancelled",
+                )
 
-        survey.status = "Cancelled"
+            CRMService.validate_survey_transition(survey.status, "Cancelled")
+            previous_status = survey.status
+            updated_count = (
+                survey_query.filter(SiteSurvey.status == previous_status)
+                .update({"status": "Cancelled"}, synchronize_session=False)
+            )
+            if updated_count != 1:
+                db.expire(survey)
+                current_status = survey_query.with_for_update().first()
+                if not current_status:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Site survey not found",
+                    )
+                if current_status.status == "Cancelled":
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="Site survey is already cancelled",
+                    )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Site survey changed during cancellation; retry the request",
+                )
 
-        CRMService.record_activity(
-            db=db,
-            entity_type="site_survey",
-            entity_id=survey.id,
-            action="cancelled",
-            title=f"Site survey cancelled for {survey.customer_name}",
-            description=f"Survey #{survey.id} marked as Cancelled",
-            customer_id=survey.customer_id,
-            customer_name=survey.customer_name,
-            user_id=user_id,
-            status_val="Cancelled",
-        )
+            survey.status = "Cancelled"
+            if survey.customer_id:
+                db.query(Customer).filter(
+                    Customer.id == survey.customer_id
+                ).with_for_update().first()
 
-        # Determine related lead
-        lead = None
-        if survey.lead_id:
-            lead = db.query(Lead).filter(Lead.id == survey.lead_id).first()
-        elif survey.customer_id:
-            lead = db.query(Lead).filter(
-                Lead.customer_id == survey.customer_id,
-                Lead.status == "Site Survey",
-            ).first()
-
-        if lead and lead.status == "Site Survey":
-            lead.status = "Cancelled"
             CRMService.record_activity(
                 db=db,
-                entity_type="lead",
-                entity_id=lead.id,
+                entity_type="site_survey",
+                entity_id=survey.id,
                 action="cancelled",
-                title=f"Lead cancelled: {lead.name}",
-                description=f"Related Site Survey #{survey.id} was cancelled",
+                title=f"Site survey cancelled for {survey.customer_name}",
+                description=f"Survey #{survey.id} marked as Cancelled",
                 customer_id=survey.customer_id,
                 customer_name=survey.customer_name,
-                user_id=user_id,
+                user_id=current_user.id,
                 status_val="Cancelled",
             )
 
-        CRMService.recalculate_customer_status(db, survey.customer_id)
+            # Determine related lead
+            lead = None
+            if survey.lead_id:
+                lead = (
+                    db.query(Lead)
+                    .filter(Lead.id == survey.lead_id)
+                    .with_for_update()
+                    .first()
+                )
+            elif survey.customer_id:
+                lead = (
+                    db.query(Lead)
+                    .filter(
+                        Lead.customer_id == survey.customer_id,
+                        Lead.status == "Site Survey",
+                    )
+                    .order_by(Lead.id)
+                    .with_for_update()
+                    .first()
+                )
 
-        if survey.assigned_user_id:
-            NotificationService.create_notification(
-                db=db,
-                user_id=survey.assigned_user_id,
-                title="Site Survey Cancelled",
-                message=f"Site survey for {survey.customer_name} was cancelled.",
-                notification_type="survey_cancelled",
-                entity_type="site_survey",
-                entity_id=survey.id,
-            )
-        if lead and lead.assigned_user_id and lead.assigned_user_id != survey.assigned_user_id:
-            NotificationService.create_notification(
-                db=db,
-                user_id=lead.assigned_user_id,
-                title="Site Survey Cancelled",
-                message=f"Site survey for {survey.customer_name} was cancelled.",
-                notification_type="survey_cancelled",
-                entity_type="site_survey",
-                entity_id=survey.id,
-            )
+            if lead and lead.status == "Site Survey":
+                lead.status = "Cancelled"
+                CRMService.record_activity(
+                    db=db,
+                    entity_type="lead",
+                    entity_id=lead.id,
+                    action="cancelled",
+                    title=f"Lead cancelled: {lead.name}",
+                    description=f"Related Site Survey #{survey.id} was cancelled",
+                    customer_id=survey.customer_id,
+                    customer_name=survey.customer_name,
+                    user_id=current_user.id,
+                    status_val="Cancelled",
+                )
+            notified_users = set()
+            for recipient_id in (
+                survey.assigned_user_id,
+                lead.assigned_user_id if lead else None,
+            ):
+                if recipient_id is None or recipient_id in notified_users:
+                    continue
+                notified_users.add(recipient_id)
+                NotificationService.create_notification(
+                    db=db,
+                    user_id=recipient_id,
+                    title="Site Survey Cancelled",
+                    message=f"Site survey for {survey.customer_name} was cancelled.",
+                    notification_type="survey_cancelled",
+                    entity_type="site_survey",
+                    entity_id=survey.id,
+                )
 
-        db.commit()
-        db.refresh(survey)
-        if lead:
-            db.refresh(lead)
+            CRMService.recalculate_customer_status(db, survey.customer_id)
 
-        return {"survey": survey, "lead": lead}
+            db.commit()
+            db.refresh(survey)
+            if lead:
+                db.refresh(lead)
+
+            return {"survey": survey, "lead": lead}
+        except Exception:
+            db.rollback()
+            raise
 
     @staticmethod
     def lead_convert_workflow(
@@ -677,101 +763,144 @@ class CRMService:
         return {"lead": lead, "project": project, "customer": customer}
 
     @staticmethod
-    def project_start_workflow(db: Session, project_id: int, user_id: Optional[int] = None) -> Project:
-        """
-        Transition Project: Planning -> In Progress.
-        """
-        project = db.query(Project).filter(Project.id == project_id).first()
+    def _manageable_project_for_update(
+        db: Session,
+        project_id: int,
+        user_id: Optional[int],
+    ) -> Project:
+        user = db.query(User).filter(User.id == user_id).first() if user_id else None
+        if not user or user.status != "Active" or user.role.lower() not in STAFF_ROLE_SET:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Operation not permitted")
+
+        query = db.query(Project).outerjoin(Customer, Project.customer_id == Customer.id)
+        if user.role.lower() not in {"admin", "manager"}:
+            query = query.filter(
+                or_(
+                    Project.assigned_user_id == user.id,
+                    Customer.assigned_user_id == user.id,
+                )
+            )
+        project = (
+            query.filter(Project.id == project_id)
+            .with_for_update(of=Project)
+            .populate_existing()
+            .first()
+        )
         if not project:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-        CRMService.validate_project_transition(project.status, "In Progress")
-
-        project.status = "In Progress"
-        if not project.start_date:
-            project.start_date = datetime.now(timezone.utc)
-
-        cust_name = project.customer.name if project.customer else ""
-        CRMService.record_activity(
-            db=db,
-            entity_type="project",
-            entity_id=project.id,
-            action="started",
-            title=f"Project started: {project.name}",
-            description=f"Project transitioned from Planning to In Progress",
-            customer_id=project.customer_id,
-            customer_name=cust_name,
-            user_id=user_id,
-            status_val="In Progress",
-        )
-
-        CRMService.recalculate_customer_status(db, project.customer_id)
-
-        db.commit()
-        db.refresh(project)
         return project
+
+    @staticmethod
+    def project_transition_workflow(
+        db: Session,
+        project_id: int,
+        target_status: str,
+        user_id: Optional[int] = None,
+        actual_cost: Optional[float] = None,
+        commit: bool = True,
+    ) -> Project:
+        """Validate, authorize, and persist a project status transition atomically."""
+        try:
+            project = CRMService._manageable_project_for_update(db, project_id, user_id)
+            previous_status = project.status
+            CRMService.validate_project_transition(previous_status, target_status)
+            if previous_status == target_status:
+                return project
+
+            project.status = target_status
+            if target_status == "In Progress" and previous_status == "Planning" and not project.start_date:
+                project.start_date = datetime.now(timezone.utc).date()
+            if target_status == "Completed":
+                if not project.completion_date:
+                    project.completion_date = datetime.now(timezone.utc).date()
+                if actual_cost is not None:
+                    project.actual_cost = actual_cost
+
+            activity_details = {
+                ("Planning", "In Progress"): (
+                    "started",
+                    f"Project started: {project.name}",
+                    "Project transitioned from Planning to In Progress",
+                ),
+                ("In Progress", "On Hold"): (
+                    "on_hold",
+                    f"Project on hold: {project.name}",
+                    "Project transitioned from In Progress to On Hold",
+                ),
+                ("On Hold", "In Progress"): (
+                    "resumed",
+                    f"Project resumed: {project.name}",
+                    "Project transitioned from On Hold to In Progress",
+                ),
+                ("In Progress", "Completed"): (
+                    "completed",
+                    f"Project completed: {project.name}",
+                    "Project marked as Completed",
+                ),
+                ("Planning", "Cancelled"): (
+                    "cancelled",
+                    f"Project cancelled: {project.name}",
+                    "Project marked as Cancelled",
+                ),
+                ("In Progress", "Cancelled"): (
+                    "cancelled",
+                    f"Project cancelled: {project.name}",
+                    "Project marked as Cancelled",
+                ),
+                ("On Hold", "Cancelled"): (
+                    "cancelled",
+                    f"Project cancelled: {project.name}",
+                    "Project marked as Cancelled",
+                ),
+            }
+            action, title, description = activity_details[(previous_status, target_status)]
+            cust_name = project.customer.name if project.customer else ""
+            CRMService.record_activity(
+                db=db,
+                entity_type="project",
+                entity_id=project.id,
+                action=action,
+                title=title,
+                description=description,
+                customer_id=project.customer_id,
+                customer_name=cust_name,
+                user_id=user_id,
+                status_val=target_status,
+            )
+
+            if project.assigned_user_id:
+                NotificationService.create_notification(
+                    db=db,
+                    user_id=project.assigned_user_id,
+                    title="Project Status Updated",
+                    message=f"Project '{project.name}' moved to {target_status}.",
+                    notification_type="project_status",
+                    entity_type="project",
+                    entity_id=project.id,
+                )
+
+            if target_status in {"In Progress", "Completed", "Cancelled"}:
+                CRMService.recalculate_customer_status(db, project.customer_id)
+
+            if commit:
+                db.commit()
+                db.refresh(project)
+            return project
+        except Exception:
+            db.rollback()
+            raise
+
+    @staticmethod
+    def project_start_workflow(db: Session, project_id: int, user_id: Optional[int] = None) -> Project:
+        return CRMService.project_transition_workflow(db, project_id, "In Progress", user_id)
 
     @staticmethod
     def project_hold_workflow(db: Session, project_id: int, user_id: Optional[int] = None) -> Project:
-        """
-        Transition Project: In Progress -> On Hold.
-        """
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-        CRMService.validate_project_transition(project.status, "On Hold")
-
-        project.status = "On Hold"
-
-        cust_name = project.customer.name if project.customer else ""
-        CRMService.record_activity(
-            db=db,
-            entity_type="project",
-            entity_id=project.id,
-            action="on_hold",
-            title=f"Project on hold: {project.name}",
-            description=f"Project transitioned from In Progress to On Hold",
-            customer_id=project.customer_id,
-            customer_name=cust_name,
-            user_id=user_id,
-            status_val="On Hold",
-        )
-
-        db.commit()
-        db.refresh(project)
-        return project
+        return CRMService.project_transition_workflow(db, project_id, "On Hold", user_id)
 
     @staticmethod
     def project_resume_workflow(db: Session, project_id: int, user_id: Optional[int] = None) -> Project:
-        """
-        Transition Project: On Hold -> In Progress.
-        """
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-        CRMService.validate_project_transition(project.status, "In Progress")
-
-        project.status = "In Progress"
-
-        cust_name = project.customer.name if project.customer else ""
-        CRMService.record_activity(
-            db=db,
-            entity_type="project",
-            entity_id=project.id,
-            action="resumed",
-            title=f"Project resumed: {project.name}",
-            description=f"Project transitioned from On Hold to In Progress",
-            customer_id=project.customer_id,
-            customer_name=cust_name,
-            user_id=user_id,
-            status_val="In Progress",
-        )
-
-        db.commit()
-        db.refresh(project)
-        return project
+        return CRMService.project_transition_workflow(db, project_id, "In Progress", user_id)
 
     @staticmethod
     def project_complete_workflow(
@@ -780,74 +909,13 @@ class CRMService:
         actual_cost: Optional[float] = None,
         user_id: Optional[int] = None,
     ) -> Project:
-        """
-        Transition Project: In Progress -> Completed.
-        """
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-        CRMService.validate_project_transition(project.status, "Completed")
-
-        project.status = "Completed"
-        if not project.completion_date:
-            project.completion_date = datetime.now(timezone.utc)
-        if actual_cost is not None:
-            project.actual_cost = actual_cost
-
-        cust_name = project.customer.name if project.customer else ""
-        CRMService.record_activity(
-            db=db,
-            entity_type="project",
-            entity_id=project.id,
-            action="completed",
-            title=f"Project completed: {project.name}",
-            description=f"Project marked as Completed",
-            customer_id=project.customer_id,
-            customer_name=cust_name,
-            user_id=user_id,
-            status_val="Completed",
+        return CRMService.project_transition_workflow(
+            db, project_id, "Completed", user_id, actual_cost
         )
-
-        CRMService.recalculate_customer_status(db, project.customer_id)
-
-        db.commit()
-        db.refresh(project)
-        return project
 
     @staticmethod
     def project_cancel_workflow(db: Session, project_id: int, user_id: Optional[int] = None) -> Project:
-        """
-        Cancel Project (soft transition without physical DB row deletion).
-        Preserves Lead Converted history. Recalculates Customer status.
-        """
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-
-        CRMService.validate_project_transition(project.status, "Cancelled")
-
-        project.status = "Cancelled"
-
-        cust_name = project.customer.name if project.customer else ""
-        CRMService.record_activity(
-            db=db,
-            entity_type="project",
-            entity_id=project.id,
-            action="cancelled",
-            title=f"Project cancelled: {project.name}",
-            description=f"Project marked as Cancelled",
-            customer_id=project.customer_id,
-            customer_name=cust_name,
-            user_id=user_id,
-            status_val="Cancelled",
-        )
-
-        CRMService.recalculate_customer_status(db, project.customer_id)
-
-        db.commit()
-        db.refresh(project)
-        return project
+        return CRMService.project_transition_workflow(db, project_id, "Cancelled", user_id)
 
     @staticmethod
     def lead_cancel_workflow(

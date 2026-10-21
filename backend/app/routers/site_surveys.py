@@ -514,11 +514,7 @@ def cancel_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
-    if not survey:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Site survey not found")
-    check_survey_access(survey, current_user)
-    result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+    result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
     return APIResponse(
         success=True,
         message="Site survey cancelled successfully",
@@ -543,7 +539,12 @@ def update_survey(
     check_survey_access(survey, current_user)
 
     old_status = survey.status
+    old_assigned_user_id = survey.assigned_user_id
     update_data = request.model_dump(exclude_unset=True)
+    changed_fields = [
+        field for field, value in update_data.items()
+        if getattr(survey, field) != value
+    ]
     target_status = update_data.get("status")
 
     if target_status and target_status != old_status:
@@ -554,7 +555,7 @@ def update_survey(
             res = CRMService.site_survey_complete_workflow(db, survey_id, update_data, current_user.id)
             survey = res["survey"]
         elif target_status == "Cancelled":
-            res = CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+            res = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
             survey = res["survey"]
         # Remove status so apply_survey_update doesn't re-set it
         update_data.pop("status", None)
@@ -573,6 +574,45 @@ def update_survey(
     validate_lead_reference(db, update_data.get("lead_id"))
     validate_user_reference(db, update_data.get("assigned_user_id"))
     apply_survey_update(survey, update_data)
+    CRMService.record_update_activity(
+        db=db,
+        entity_type="site_survey",
+        entity_id=survey.id,
+        title=f"Site survey updated for {survey.customer_name}",
+        changed_fields=[
+            field for field in changed_fields
+            if field not in {"status", "assigned_user_id"}
+        ],
+        customer_id=survey.customer_id,
+        customer_name=survey.customer_name,
+        user_id=current_user.id,
+        status_val=survey.status,
+    )
+    if (
+        "assigned_user_id" in update_data
+        and survey.assigned_user_id != old_assigned_user_id
+    ):
+        CRMService.record_activity(
+            db=db,
+            entity_type="site_survey",
+            entity_id=survey.id,
+            action="reassigned",
+            title=f"Site survey reassigned for {survey.customer_name}",
+            customer_id=survey.customer_id,
+            customer_name=survey.customer_name,
+            user_id=current_user.id,
+            status_val=survey.status,
+        )
+        if survey.assigned_user_id:
+            NotificationService.create_notification(
+                db=db,
+                user_id=survey.assigned_user_id,
+                title="Site Survey Assigned",
+                message=f"You have been assigned to the site survey for {survey.customer_name}.",
+                notification_type="survey_assigned",
+                entity_type="site_survey",
+                entity_id=survey.id,
+            )
 
     db.commit()
     db.refresh(survey)
@@ -594,5 +634,5 @@ def delete_survey(
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    CRMService.site_survey_cancel_workflow(db, survey_id, current_user.id)
+    CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
     return APIResponse(success=True, message="Site survey cancelled successfully (history preserved)", data=True)

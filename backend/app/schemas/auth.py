@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from app.schemas.validators import AppEmailStr, StrongPasswordStr
 
@@ -63,3 +63,9 @@ class ProfileUpdateRequest(BaseModel):
     email: Optional[AppEmailStr] = None
     phone: Optional[str] = None
 
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("name", "phone", mode="before")
+    @classmethod
+    def strip_profile_text(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if isinstance(value, str) else value

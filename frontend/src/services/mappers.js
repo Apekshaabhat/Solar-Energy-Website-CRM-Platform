@@ -108,7 +108,7 @@ export function toProjectPayload(form) {
     location: form.location,
     capacity: form.capacity,
     capacity_kw: form.capacityKW ?? form.capacity_kw,
-    status: form.status ?? "In Progress",
+    status: form.status,
     customer_id: form.customerId ?? form.customer_id,
     source_lead_id: form.sourceLeadId ?? form.source_lead_id,
     assigned_user_id: form.assignedUserId ?? form.assigned_user_id,

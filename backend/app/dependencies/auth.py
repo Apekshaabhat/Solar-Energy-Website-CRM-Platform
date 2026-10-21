@@ -28,46 +28,41 @@ def get_current_user(
     Rejects revoked tokens, inactive users (401), and outdated token versions.
     Never trusts role/status stored in the JWT claims.
     """
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
     if not token:
-        raise credentials_exception
+        raise _credentials_exception()
 
     try:
         payload = decode_access_token(token)
-        user_id_str: str = payload.get("sub")
-        if user_id_str is None:
-            raise credentials_exception
-        user_id = int(user_id_str)
+        subject = payload.get("sub")
         jti = payload.get("jti")
         token_ver = payload.get("ver")
-    except (PyJWTError, ValueError):
-        raise credentials_exception
+        if (
+            not isinstance(subject, str)
+            or not subject.isdecimal()
+            or int(subject) < 1
+            or not isinstance(jti, str)
+            or not jti
+            or type(token_ver) is not int
+            or token_ver < 0
+        ):
+            raise _credentials_exception()
+        user_id = int(subject)
+    except (PyJWTError, TypeError, ValueError, OverflowError):
+        raise _credentials_exception()
 
     # Check token revocation via jti
-    if jti:
-        is_revoked = db.query(RevokedToken.id).filter(RevokedToken.jti == jti).first() is not None
-        if is_revoked:
-            raise credentials_exception
+    is_revoked = db.query(RevokedToken.id).filter(RevokedToken.jti == jti).first() is not None
+    if is_revoked:
+        raise _credentials_exception()
 
     user = db.query(User).filter(User.id == user_id).first()
-    if user is None:
-        raise credentials_exception
-    if user.status != "Active":
-        if user.status == "Inactive":
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="User account is deactivated or inactive.",
-            )
-        raise credentials_exception
+    if user is None or user.status != "Active":
+        raise _credentials_exception()
 
     # Reject token if token_version doesn't match current user token_version
     current_version = user.token_version or 0
-    if token_ver is not None and token_ver != current_version:
-        raise credentials_exception
+    if token_ver != current_version:
+        raise _credentials_exception()
 
     return user
 
@@ -76,37 +71,18 @@ def get_optional_current_user(
     token: Optional[str] = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
 ) -> Optional[User]:
-    """Retrieve user if token is present, valid, unrevoked, active, otherwise return None."""
+    """Allow anonymous requests, but reject any supplied invalid credential."""
     if not token:
         return None
-    try:
-        payload = decode_access_token(token)
-        user_id_str: str = payload.get("sub")
-        if user_id_str is None:
-            return None
-        user_id = int(user_id_str)
-        jti = payload.get("jti")
-        token_ver = payload.get("ver")
+    return get_current_user(token=token, db=db)
 
-        if jti:
-            is_revoked = db.query(RevokedToken.id).filter(RevokedToken.jti == jti).first() is not None
-            if is_revoked:
-                return None
 
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user or user.status != "Active":
-            return None
-
-        if token_ver is not None and token_ver != (user.token_version or 0):
-            return None
-
-        return user
-    except Exception:
-        if user and user.status == "Active":
-            return user
-    except (PyJWTError, TypeError, ValueError):
-        return None
-
+def _credentials_exception() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
 
 
 def require_roles(allowed_roles: List[str]):
@@ -143,4 +119,3 @@ def require_staff(current_user: User = Depends(get_current_user)) -> User:
 
 def is_staff_user(user: Optional[User]) -> bool:
     return user is not None and user.role.lower() in STAFF_ROLE_SET
-

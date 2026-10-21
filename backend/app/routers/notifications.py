@@ -1,7 +1,8 @@
-from typing import List, Optional
+from typing import List
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.dependencies.auth import get_current_user
@@ -20,16 +21,22 @@ router = APIRouter(prefix="/notifications", tags=["Notifications"])
     summary="List authenticated user notifications",
 )
 def list_notifications(
-    limit: int = Query(50, ge=1, le=100),
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=10000),
     include_dismissed: bool = Query(False),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     query = db.query(Notification).filter(Notification.user_id == current_user.id)
     if not include_dismissed:
-        query = query.filter(Notification.is_dismissed == False)
+        query = query.filter(Notification.is_dismissed.is_(False))
 
-    notifications = query.order_by(desc(Notification.created_at)).limit(limit).all()
+    notifications = (
+        query.order_by(desc(Notification.created_at), desc(Notification.id))
+        .limit(limit)
+        .offset(offset)
+        .all()
+    )
 
     items = []
     for n in notifications:
@@ -57,8 +64,8 @@ def get_unread_count(
         db.query(Notification)
         .filter(
             Notification.user_id == current_user.id,
-            Notification.is_read == False,
-            Notification.is_dismissed == False,
+            Notification.is_read.is_(False),
+            Notification.is_dismissed.is_(False),
         )
         .count()
     )
@@ -91,8 +98,12 @@ def mark_notification_read(
         )
 
     notif.is_read = True
-    db.commit()
-    db.refresh(notif)
+    try:
+        db.commit()
+        db.refresh(notif)
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
     resp = NotificationResponse.model_validate(notif)
     resp.time = format_time_ago(notif.created_at)
@@ -114,9 +125,14 @@ def mark_all_read(
 ):
     db.query(Notification).filter(
         Notification.user_id == current_user.id,
-        Notification.is_read == False,
+        Notification.is_read.is_(False),
+        Notification.is_dismissed.is_(False),
     ).update({"is_read": True}, synchronize_session=False)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
     return APIResponse(
         success=True,
@@ -147,7 +163,11 @@ def dismiss_notification(
         )
 
     notif.is_dismissed = True
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
     return APIResponse(
         success=True,
         message="Notification dismissed successfully",
@@ -166,9 +186,13 @@ def dismiss_all_notifications(
 ):
     db.query(Notification).filter(
         Notification.user_id == current_user.id,
-        Notification.is_dismissed == False,
+        Notification.is_dismissed.is_(False),
     ).update({"is_dismissed": True}, synchronize_session=False)
-    db.commit()
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
     return APIResponse(
         success=True,

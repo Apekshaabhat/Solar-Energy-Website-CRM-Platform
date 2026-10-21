@@ -187,6 +187,7 @@ def test_calculator_management_lifecycle(client: TestClient):
 def test_notifications_system(client: TestClient):
     admin_hdr = auth_headers(client, role="Admin", email="admin_notif@solara.test")
     sales_hdr = auth_headers(client, role="Sales Rep", email="sales_notif@solara.test")
+    assert client.get("/api/v1/notifications").status_code == 401
 
     # Get user profiles to know IDs
     admin_me = client.get("/api/v1/auth/me", headers=admin_hdr).json()["data"]
@@ -207,6 +208,24 @@ def test_notifications_system(client: TestClient):
         },
     )
     assert lead_resp.status_code == 201
+    second_lead = client.post(
+        "/api/v1/leads",
+        headers=admin_hdr,
+        json={
+            "name": "Meera Shah",
+            "contact": "+91 99887 11224",
+            "location": "Pune",
+            "property_type": "Residential",
+            "source": "Referral",
+            "assigned_user_id": sales_id,
+        },
+    )
+    assert second_lead.status_code == 201
+    assert client.patch(
+        f"/api/v1/leads/{lead_resp.json()['data']['id']}",
+        headers=sales_hdr,
+        json={"notes": "Follow-up requested"},
+    ).status_code == 200
 
     # 2. Check Sales Rep's notifications
     sales_notifs = client.get("/api/v1/notifications", headers=sales_hdr)
@@ -216,6 +235,20 @@ def test_notifications_system(client: TestClient):
     lead_notif = next((n for n in items if "Arjun Rao" in n["message"]), None)
     assert lead_notif is not None
     assert lead_notif["is_read"] is False
+    first_page = client.get(
+        "/api/v1/notifications?limit=1&offset=0",
+        headers=sales_hdr,
+    ).json()["data"]
+    second_page = client.get(
+        "/api/v1/notifications?limit=1&offset=1",
+        headers=sales_hdr,
+    ).json()["data"]
+    assert len(first_page) == len(second_page) == 1
+    assert first_page[0]["id"] != second_page[0]["id"]
+    assert client.get(
+        "/api/v1/notifications?limit=101",
+        headers=sales_hdr,
+    ).status_code == 422
 
     # 3. Check unread count
     unread_resp = client.get("/api/v1/notifications/unread-count", headers=sales_hdr)
@@ -226,6 +259,14 @@ def test_notifications_system(client: TestClient):
     admin_notifs = client.get("/api/v1/notifications", headers=admin_hdr)
     admin_ids = [n["id"] for n in admin_notifs.json()["data"]]
     assert lead_notif["id"] not in admin_ids
+    assert client.patch(
+        f"/api/v1/notifications/{lead_notif['id']}/read",
+        headers=admin_hdr,
+    ).status_code == 404
+    assert client.delete(
+        f"/api/v1/notifications/{lead_notif['id']}",
+        headers=admin_hdr,
+    ).status_code == 404
 
     # 5. Mark single notification as read
     read_resp = client.patch(f"/api/v1/notifications/{lead_notif['id']}/read", headers=sales_hdr)
@@ -249,6 +290,21 @@ def test_notifications_system(client: TestClient):
 
     notifs_after_dismiss = client.get("/api/v1/notifications", headers=sales_hdr).json()["data"]
     assert lead_notif["id"] not in [n["id"] for n in notifs_after_dismiss]
+
+    activities = client.get("/api/v1/dashboard/activities?limit=100", headers=sales_hdr)
+    assert activities.status_code == 200
+    activity_items = activities.json()["data"]
+    assert any("Lead created: Arjun Rao" == activity["title"] for activity in activity_items)
+    assert any("Lead updated: Arjun Rao" == activity["title"] for activity in activity_items)
+    first_activity_page = client.get(
+        "/api/v1/dashboard/activities?limit=1&offset=0",
+        headers=sales_hdr,
+    ).json()["data"]
+    second_activity_page = client.get(
+        "/api/v1/dashboard/activities?limit=1&offset=1",
+        headers=sales_hdr,
+    ).json()["data"]
+    assert first_activity_page[0]["id"] != second_activity_page[0]["id"]
 
 
 def test_faq_management_lifecycle(client: TestClient):
