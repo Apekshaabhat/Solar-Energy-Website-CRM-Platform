@@ -31,7 +31,7 @@ import ResetPasswordPage from "./components/ResetPasswordPage";
 import ActivatePage from "./components/ActivatePage";
 import { DashboardDataProvider } from "./context/DashboardDataContext";
 import { themes } from "./context/ThemeContext";
-import { AuthProvider, ProtectedRoute } from "./context/AuthContext";
+import { AuthProvider, ProtectedRoute, PublicOnlyRoute } from "./context/AuthContext";
 
 function PublicSite() {
   const [isDark, setIsDark] = useState(false);
@@ -246,9 +246,31 @@ export default function App() {
               />
             </Route>
 
-            {/* Public Site Routes */}
-            <Route path="/login" element={<LoginPage theme={theme} />} />
-            <Route path="/reset-password" element={<ResetPasswordPage theme={theme} />} />
+            {/* Public Site Routes with Guardrails */}
+            <Route
+              path="/login"
+              element={
+                <PublicOnlyRoute>
+                  <LoginPage theme={theme} />
+                </PublicOnlyRoute>
+              }
+            />
+            <Route
+              path="/signup"
+              element={
+                <PublicOnlyRoute>
+                  <SignupPage theme={theme} />
+                </PublicOnlyRoute>
+              }
+            />
+            <Route
+              path="/reset-password"
+              element={
+                <PublicOnlyRoute>
+                  <ResetPasswordPage theme={theme} />
+                </PublicOnlyRoute>
+              }
+            />
             <Route path="/activate" element={<ActivatePage theme={theme} />} />
             <Route path="/*" element={<PublicSite />} />
           </Routes>

@@ -200,3 +200,4 @@ scratch/
 *.pid
 *.seed
 
+.env

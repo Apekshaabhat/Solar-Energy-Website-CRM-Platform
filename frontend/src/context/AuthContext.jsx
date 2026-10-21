@@ -10,6 +10,7 @@ export function AuthProvider({ children }) {
   const [token, setTokenState] = useState(() => getToken());
   const [isLoading, setIsLoading] = useState(true);
 
+  // Gap 1 & 13: Session Restoration & Inactive Account Verification on App Start
   const checkAuthStatus = useCallback(async () => {
     const currentToken = getToken();
     if (!currentToken) {
@@ -21,6 +22,15 @@ export function AuthProvider({ children }) {
 
     try {
       const me = await authApi.me();
+      
+      // Reject inactive or disabled accounts on frontend session check
+      if (me?.status && me.status.toLowerCase() !== "active") {
+        clearAuth();
+        setUser(null);
+        setTokenState(null);
+        return;
+      }
+
       setUser(me);
       setTokenState(currentToken);
     } catch (err) {
@@ -44,11 +54,19 @@ export function AuthProvider({ children }) {
     return () => window.removeEventListener("solara_auth_logout", handleLogoutEvent);
   }, [checkAuthStatus]);
 
+  // Gap 8: Remember Me Duration & Login Handler
   const login = async (email, password, rememberMe) => {
     setIsLoading(true);
     try {
       const res = await authApi.login(email, password, rememberMe);
       const me = res.user || (await authApi.me());
+
+      // Reject login if account is inactive
+      if (me?.status && me.status.toLowerCase() !== "active") {
+        clearAuth();
+        throw new Error("Your account is currently inactive. Please contact support.");
+      }
+
       setUser(me);
       setTokenState(getToken());
       return me;
@@ -57,11 +75,15 @@ export function AuthProvider({ children }) {
     }
   };
 
+  // Gap 9: Server-side & Client-side Logout
   const logout = async () => {
     setIsLoading(true);
     try {
       await authApi.logout();
+    } catch (err) {
+      console.warn("Logout error (session cleared locally anyway):", err);
     } finally {
+      clearAuth();
       setUser(null);
       setTokenState(null);
       setIsLoading(false);
@@ -94,6 +116,7 @@ export function useAuth() {
   return context;
 }
 
+// Gap 11: Consistent Role-Based Dashboard Routing
 export function getDefaultRouteForRole(role = "") {
   if (!role) return "/dashboard";
   const r = role.toLowerCase().trim();
@@ -101,11 +124,12 @@ export function getDefaultRouteForRole(role = "") {
     return "/dashboard";
   }
   if (r === "customer") {
-    return "/dashboard/profile";
+    return "/dashboard/customer";
   }
   return "/dashboard";
 }
 
+// Protected Route Guard for Authorized Pages
 export function ProtectedRoute({ children, allowedRoles }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const location = useLocation();
@@ -146,6 +170,19 @@ export function ProtectedRoute({ children, allowedRoles }) {
         </div>
       );
     }
+  }
+
+  return children;
+}
+
+// Public Guard (Prevents logged in users from re-visiting Login/Signup)
+export function PublicOnlyRoute({ children }) {
+  const { user, isAuthenticated, isLoading } = useAuth();
+
+  if (isLoading) return null;
+
+  if (isAuthenticated && user?.role) {
+    return <Navigate to={getDefaultRouteForRole(user.role)} replace />;
   }
 
   return children;

@@ -159,8 +159,8 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
 def check_survey_access(survey: SiteSurvey, current_user: User) -> None:
     if current_user.role in ["Admin", "Manager"]:
         return
-    if current_user.role == "Customer":
-        if not current_user.customer_id or survey.customer_id != current_user.customer_id:
+    if current_user.role.lower() == "customer":
+        if not survey.customer or survey.customer.account_user_id != current_user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: You are not authorized to view this site survey."
@@ -209,15 +209,10 @@ def list_surveys(
 ):
     query = accessible_surveys_query(db, current_user)
 
-    # Scoping
     if current_user.role in ["Sales Rep", "Support"]:
         query = query.filter(or_(SiteSurvey.assigned_user_id == current_user.id, SiteSurvey.assigned_to == current_user.name))
-    elif current_user.role == "Customer":
-        if current_user.customer_id:
-            query = query.filter(SiteSurvey.customer_id == current_user.customer_id)
-        else:
-            query = query.filter(SiteSurvey.customer_name == current_user.name)
-
+    elif current_user.role.lower() == "customer":
+        pass
 
     if search:
         s = f"%{search.strip()}%"
@@ -235,7 +230,6 @@ def list_surveys(
     if property_type and property_type not in ["All", "All Property Types"]:
         query = query.filter(SiteSurvey.property_type.ilike(property_type))
 
-    # Calculate status counts across all matches before applying status filter
     tab_counts = {"All Surveys": query.count()}
     for st in SURVEY_STATUSES:
         tab_counts[st] = query.filter(SiteSurvey.status == st).count()
@@ -327,11 +321,14 @@ def create_survey(
     current_user: Optional[User] = Depends(get_optional_current_user),
     db: Session = Depends(get_db),
 ):
-    is_staff = is_staff_user(current_user)
+    is_staff = is_staff_user(current_user) if current_user else False
     customer_id = None
     project_id = None
     lead_id = None
     assigned_user_id = None
+    survey_status = "Scheduled"
+    assigned_to = "Rahul"
+
     if current_user is not None and is_staff:
         if is_survey_manager(current_user):
             assigned_user_id = request.assigned_user_id
@@ -348,6 +345,8 @@ def create_survey(
         lead_id = request.lead_id
         validate_survey_relationships(db, customer_id, project_id, current_user)
         validate_lead_reference(db, lead_id)
+        survey_status = request.status if request.status else "Scheduled"
+        assigned_to = request.assigned_to.strip() if request.assigned_to else "Rahul"
     elif current_user is not None and current_user.role.lower() == "customer":
         customer = customer_profile_for_user(db, current_user)
         if request.customer_id is not None and (
@@ -360,10 +359,18 @@ def create_survey(
             validate_project_reference(db, request.project_id, customer_id=customer.id)
         customer_id = customer.id if customer is not None else None
         project_id = request.project_id
+        survey_status = "Scheduled"
+        assigned_to = "Rahul"
+    else:
+        customer_id = None
+        project_id = None
+        assigned_user_id = None
+        survey_status = "Scheduled"
+        assigned_to = "Rahul"
 
     customer_name = request.customer_name.strip()
-    if request.customer_id:
-        cust = db.query(Customer).filter(Customer.id == request.customer_id).first()
+    if customer_id:
+        cust = db.query(Customer).filter(Customer.id == customer_id).first()
         if cust:
             customer_name = cust.name
 
@@ -373,8 +380,8 @@ def create_survey(
         property_type=request.property_type,
         survey_date=request.survey_date.strip(),
         time_slot=request.time_slot.strip(),
-        assigned_to=request.assigned_to.strip(),
-        status=request.status if request.status else "Scheduled",
+        assigned_to=assigned_to,
+        status=survey_status,
         customer_id=customer_id,
         project_id=project_id,
         lead_id=lead_id,
@@ -399,7 +406,6 @@ def create_survey(
         status_val=survey.status,
     )
 
-    # If linked to lead, move lead to Site Survey
     if survey.lead_id:
         lead = db.query(Lead).filter(Lead.id == survey.lead_id).first()
         if lead and lead.status in ["New", "Contacted"]:
@@ -557,7 +563,6 @@ def update_survey(
         elif target_status == "Cancelled":
             res = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
             survey = res["survey"]
-        # Remove status so apply_survey_update doesn't re-set it
         update_data.pop("status", None)
     if (
         "assigned_user_id" in update_data
@@ -623,16 +628,34 @@ def update_survey(
     )
 
 
-
 @router.delete(
     "/{survey_id}",
     response_model=APIResponse[bool],
-    summary="Cancel site survey (soft transition preserving history)",
+    summary="Cancel site survey",
 )
 def delete_survey(
     survey_id: int,
     current_user: User = Depends(require_roles(["Admin", "Manager"])),
     db: Session = Depends(get_db),
 ):
-    CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
-    return APIResponse(success=True, message="Site survey cancelled successfully (history preserved)", data=True)
+    survey = db.query(SiteSurvey).filter(
+        SiteSurvey.id == survey_id
+    ).first()
+
+    if not survey:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Site survey not found",
+        )
+
+    check_survey_access(survey, current_user)
+
+    CRMService.site_survey_cancel_workflow(
+        db, survey_id, current_user
+    )
+
+    return APIResponse(
+        success=True,
+        message="Site survey cancelled successfully (history preserved)",
+        data=True,
+    )
