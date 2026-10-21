@@ -32,7 +32,6 @@ def test_seeded_admin_login_uses_dev_password(client):
 
 
 def test_register_login_and_me(client):
-    # Registration with strong password meets policy
     response = client.post(
         "/api/v1/auth/register",
         json={
@@ -47,7 +46,6 @@ def test_register_login_and_me(client):
     assert response.json()["data"]["email"] == "asha@example.com"
     assert response.json()["data"]["role"] == "Customer"
 
-    # Duplicate registration returns identical generic response without revealing account existence
     duplicate = client.post(
         "/api/v1/auth/register",
         json={
@@ -59,7 +57,6 @@ def test_register_login_and_me(client):
     assert duplicate.status_code == 201
     assert duplicate.json()["success"] is True
 
-    # Pending user cannot log in
     pending_login = client.post(
         "/api/v1/auth/login",
         json={"email": "asha@example.com", "password": "StrongPassword123"},
@@ -67,7 +64,6 @@ def test_register_login_and_me(client):
     assert pending_login.status_code == 401
     assert pending_login.json()["message"] == "Incorrect email or password"
 
-    # Once user is set to Active, login succeeds
     with Session(engine) as db:
         user = db.query(User).filter(User.email == "asha@example.com").first()
         user.status = "Active"
@@ -599,28 +595,28 @@ def test_customer_access_is_scoped_to_assigned_staff_and_preserves_manager_acces
 def test_customer_profile_uses_explicit_account_relationship(client):
     admin_headers = auth_headers(client, email="profile-admin@solara.test")
     staff_headers_for_owner = staff_headers(client, "profile-staff@solara.test", "Sales Rep")
-    first_register = client.post(
-        "/api/v1/auth/register",
-        json={
-            "name": "Profile Customer",
-            "email": "profile-customer@solara.test",
-            "password": "password123",
-        },
-    )
-    second_register = client.post(
-        "/api/v1/auth/register",
-        json={
-            "name": "Other Customer",
-            "email": "other-customer@solara.test",
-            "password": "password123",
-        },
-    )
+    
+    def register_and_activate(name, email, password):
+        register = client.post(
+            "/api/v1/auth/register",
+            json={"name": name, "email": email, "password": password},
+        )
+        assert register.status_code == 201
+        with Session(engine) as db:
+            user = db.query(User).filter(User.email == email).first()
+            if user:
+                user.status = "Active"
+                db.commit()
+        return register
+
+    first_register = register_and_activate("Profile Customer", "profile-customer@solara.test", "Password123")
+    second_register = register_and_activate("Other Customer", "other-customer@solara.test", "Password123")
     assert first_register.status_code == second_register.status_code == 201
 
     def login_headers(email):
         response = client.post(
             "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
+            json={"email": email, "password": "Password123"},
         )
         assert response.status_code == 200
         token = response.json()["access_token"]
@@ -848,15 +844,17 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
     def register_customer(name, email):
         register = client.post(
             "/api/v1/auth/register",
-            json={"name": name, "email": email, "password": "password123"},
+            json={"name": name, "email": email, "password": "Password123"},
         )
         assert register.status_code == 201
-        login = client.post(
-            "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
-        )
-        assert login.status_code == 200
-        return register.json()["data"], {"Authorization": "Bearer " + login.json()["access_token"]}
+        with Session(engine) as db:
+            user = db.query(User).filter(User.email == email).first()
+            if user:
+                user.status = "Active"
+                db.commit()
+                user_id = user.id
+        token = create_access_token(str(user_id))
+        return register.json()["data"], {"Authorization": "Bearer " + token}
 
     customer_user, customer_headers = register_customer(
         "Linked Project Customer", "linked-project-customer@solara.test"
@@ -1306,15 +1304,17 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
     def register_customer(name, email):
         registered = client.post(
             "/api/v1/auth/register",
-            json={"name": name, "email": email, "password": "password123"},
+            json={"name": name, "email": email, "password": "Password123"},
         )
         assert registered.status_code == 201
-        token = client.post(
-            "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
-        )
-        assert token.status_code == 200
-        return registered.json()["data"], {"Authorization": "Bearer " + token.json()["access_token"]}
+        with Session(engine) as db:
+            user = db.query(User).filter(User.email == email).first()
+            if user:
+                user.status = "Active"
+                db.commit()
+                user_id = user.id
+        token = create_access_token(str(user_id))
+        return registered.json()["data"], {"Authorization": "Bearer " + token}
 
     first_user, first_customer_headers = register_customer(
         "Survey Customer One", "survey-customer-one@solara.test"

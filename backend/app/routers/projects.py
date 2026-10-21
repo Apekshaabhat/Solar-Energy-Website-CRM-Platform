@@ -125,7 +125,7 @@ def check_project_access(project: Project, current_user: Optional[User]) -> None
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     if current_user.role in ["Admin", "Manager"]:
         return
-    if current_user.role == "Customer" and current_user.customer_id and project.customer_id == current_user.customer_id:
+    if current_user.role.lower() == "customer" and project.customer and project.customer.account_user_id == current_user.id:
         return
     if current_user.role in ["Sales Rep", "Support"] and project.assigned_user_id == current_user.id:
         return
@@ -237,7 +237,6 @@ def create_project(
 
     cust_name = project.customer.name if project.customer else "Direct Customer"
 
-    # If linked to lead, ensure lead is marked as Converted
     if project.source_lead_id:
         lead = db.query(Lead).filter(Lead.id == project.source_lead_id).first()
         if lead and lead.status != "Converted":
@@ -379,7 +378,6 @@ def get_project(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     check_project_access(project, current_user)
     return APIResponse(success=True, data=build_project_response(project))
-
 
 
 @router.patch(

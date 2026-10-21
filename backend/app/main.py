@@ -10,17 +10,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from slowapi.errors import RateLimitExceeded
-
-from app.core.config import settings
-from app.core.database import engine, Base
-from app.core.limiter import limiter
-from app.models.token import RevokedToken, PasswordResetToken
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import SessionLocal, engine
+from app.core.database import SessionLocal, engine, Base
+from app.core.limiter import limiter
+from app.models.token import RevokedToken, PasswordResetToken
 from app.models.user import User
 import app.models  # ensure models are registered
+
 from app.routers import (
     auth_router,
     users_router,
@@ -122,7 +120,6 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     if request.url.path.startswith(("/docs", "/redoc")):
-        # Relaxed policy so Swagger UI / ReDoc can load their assets
         response.headers["Content-Security-Policy"] = (
             "default-src 'none'; "
             "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
