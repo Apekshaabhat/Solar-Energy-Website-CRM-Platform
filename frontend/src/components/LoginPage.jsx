@@ -33,19 +33,15 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
 
     try {
       const loggedUser = await login(email, password, rememberMe);
-      if (loggedUser?.status && loggedUser.status !== "Active") {
-        throw new Error(`Your account is currently ${loggedUser.status}. Please contact an administrator or check your activation link.`);
-      }
-      const targetRoute =
-        location.state?.from?.pathname || getDefaultRouteForRole(loggedUser?.role);
-      navigate(targetRoute, { replace: true });
+      const targetRoute = getDefaultRouteForRole(loggedUser?.role);
+      navigate(targetRoute);
     } catch (err) {
-      if (err.status === 401 || err.status === 422) {
-        setError('Invalid email or password');
+      if (err.status === 401 || err.status === 422 || err.message?.includes('inactive')) {
+        setError(err.message || 'Invalid email or password');
       } else if (err.status === 429) {
         setError('Too many attempts, please try again later');
       } else {
-        setError('Something went wrong, please try again');
+        setError(err.message || 'Something went wrong, please try again');
       }
     } finally {
       setIsSubmitting(false);
@@ -106,7 +102,6 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
           theme={theme}
         />
 
-        {/* Row below fields: Remember me checkbox + Forgot password link */}
         <div className="flex items-center justify-between pt-1">
           <label className="flex items-center gap-2 cursor-pointer text-sm font-medium select-none" style={{ color: theme.textMuted }}>
             <input
@@ -129,7 +124,6 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
           </button>
         </div>
 
-        {/* Full-width filled green pill Log In button */}
         <button
           type="submit"
           disabled={isSubmitting}

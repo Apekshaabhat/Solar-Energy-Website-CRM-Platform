@@ -123,6 +123,20 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Source lead not found")
 
 
+def check_project_access(project: Project, current_user: Optional[User]) -> None:
+    if project.is_public:
+        return
+    if not current_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if current_user.role in ["Admin", "Manager"]:
+        return
+    if current_user.role.lower() == "customer" and project.customer and project.customer.account_user_id == current_user.id:
+        return
+    if current_user.role in ["Sales Rep", "Support"] and project.assigned_user_id == current_user.id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this project.")
+
+
 def apply_project_update(project: Project, update_data: dict) -> None:
     for field, val in update_data.items():
         if val is None and field not in NULLABLE_PROJECT_FIELDS:
@@ -236,7 +250,6 @@ def create_project(
 
     cust_name = project.customer.name if project.customer else "Direct Customer"
 
-    # If linked to lead, ensure lead is marked as Converted
     if project.source_lead_id:
         lead = db.query(Lead).filter(Lead.id == project.source_lead_id).first()
         if lead and lead.status != "Converted":
