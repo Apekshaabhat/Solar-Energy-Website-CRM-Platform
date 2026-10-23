@@ -22,6 +22,7 @@ from app.schemas.auth import (
 from app.schemas.user import UserResponse
 from app.schemas.common import APIResponse
 from app.services.auth_service import AuthService
+from app.services.email_service import EmailService
 
 
 router = APIRouter(
@@ -46,13 +47,21 @@ def register(
     body: RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    user = AuthService.register_user(db, body)
+    user, activation_token = AuthService.register_user(db, body)
+    if user and activation_token:
+        if not EmailService.send_account_invitation_email(user.email, activation_token):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    "Your account was created, but the activation email could not be sent. "
+                    "Please try signing up again later or contact support."
+                ),
+            )
 
     return APIResponse(
         success=True,
         message=(
-            "Registration request submitted. Your account "
-            "is pending administrator approval."
+            "Registration successful. Check your email for the activation link."
         ),
         data=UserResponse.model_validate(user) if user else None,
     )

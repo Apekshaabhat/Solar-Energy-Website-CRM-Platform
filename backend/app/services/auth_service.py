@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from jwt import PyJWTError
 import secrets
 from fastapi import HTTPException, status
-from app.core.config import settings
+from app.core.config import settings, validate_admin_seed_password
 from app.core.security import (
     get_password_hash,
     verify_password,
@@ -48,28 +48,45 @@ def ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
 
 class AuthService:
     @staticmethod
-    def register_user(db: Session, request: RegisterRequest) -> User:
+    def register_user(db: Session, request: RegisterRequest) -> tuple[Optional[User], Optional[str]]:
         """
         Public registration endpoint.
         IMPORTANT: Public signup MUST NEVER grant Admin or Staff privileges.
         All public registrations are strictly assigned role='Customer'.
         """
         email_clean = request.email.lower().strip()
-        existing = db.query(User).filter(User.email == email_clean).first()
+        existing = (
+            db.query(User)
+            .filter(User.email == email_clean)
+            .with_for_update()
+            .first()
+        )
         if existing:
-            return None
-
-        # Enforce Customer role unconditionally for public signup
-        role = "Customer"
-
-        # Check or create linked customer record
-        matched_customer = db.query(Customer).filter(Customer.email.ilike(email_clean)).first()
-        if not matched_customer and request.phone:
-            matched_customer = db.query(Customer).filter(Customer.phone == request.phone.strip()).first()
-
-        if matched_customer:
-            customer_id = matched_customer.id
+            if existing.role != "Customer" or existing.status != "Pending":
+                return None, None
+            user = existing
+            now = datetime.now(timezone.utc)
+            active_token = (
+                db.query(PasswordResetToken.id)
+                .filter(
+                    PasswordResetToken.user_id == user.id,
+                    PasswordResetToken.token_type == "activate",
+                    PasswordResetToken.used_at.is_(None),
+                    PasswordResetToken.expires_at > now,
+                )
+                .first()
+            )
+            invitation_expiry = ensure_utc(user.invitation_expires_at)
+            if active_token or (
+                user.invitation_token_hash
+                and invitation_expiry
+                and invitation_expiry > now
+            ):
+                return None, None
         else:
+            # Enforce Customer role unconditionally for public signup
+            role = "Customer"
+
             new_customer = Customer(
                 name=request.name.strip(),
                 contact=request.phone.strip() if request.phone else email_clean,
@@ -84,36 +101,51 @@ class AuthService:
             db.flush()
             customer_id = new_customer.id
 
-        user = User(
-            name=request.name.strip(),
-            email=email_clean,
-            password_hash=get_password_hash(request.password),
-            phone=request.phone.strip() if request.phone else None,
-            role=role,
-            status="Pending",
-            token_version=0,
-            failed_attempts=0,
-            locked_until=None,
-            customer_id=customer_id,
-        )
-        db.add(user)
-        db.flush()
+            user = User(
+                name=request.name.strip(),
+                email=email_clean,
+                password_hash=get_password_hash(request.password),
+                phone=request.phone.strip() if request.phone else None,
+                role=role,
+                status="Pending",
+                token_version=0,
+                failed_attempts=0,
+                locked_until=None,
+                customer_id=customer_id,
+            )
+            db.add(user)
+            db.flush()
 
-        CRMService.record_activity(
-            db=db,
-            entity_type="user",
-            entity_id=user.id,
-            action="registered",
-            title=f"Customer registered: {user.name}",
-            description=f"Public registration completed for {user.email}",
-            customer_id=customer_id,
-            customer_name=user.name,
-            status_val=user.status,
-        )
+            CRMService.record_activity(
+                db=db,
+                entity_type="user",
+                entity_id=user.id,
+                action="registered",
+                title=f"Customer registered: {user.name}",
+                description=f"Public registration completed for {user.email}",
+                customer_id=customer_id,
+                customer_name=user.name,
+                status_val=user.status,
+            )
 
+        raw_token = secrets.token_urlsafe(32)
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.token_type == "activate",
+            PasswordResetToken.used_at.is_(None),
+        ).delete(synchronize_session=False)
+        db.add(
+            PasswordResetToken(
+                user_id=user.id,
+                token_hash=hash_token(raw_token),
+                token_type="activate",
+                expires_at=datetime.now(timezone.utc)
+                + timedelta(hours=settings.ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS),
+            )
+        )
         db.commit()
         db.refresh(user)
-        return user
+        return user, raw_token
 
     @staticmethod
     def bootstrap_admin(
@@ -131,15 +163,20 @@ class AuthService:
         email_clean = email.lower().strip()
         existing = db.query(User).filter(User.email == email_clean).first()
         if existing:
-            existing.name = name.strip()
-            existing.role = role
-            existing.status = "Active"
-            existing.password_hash = get_password_hash(password)
-            if phone:
-                existing.phone = phone.strip()
-            db.commit()
-            db.refresh(existing)
+            if existing.role.strip().casefold() != role.strip().casefold():
+                raise ValueError(
+                    f"Account {email_clean} already exists with a different role."
+                )
             return existing
+
+        if role.strip().casefold() == "admin":
+            try:
+                password = validate_admin_seed_password(password)
+            except ValueError as exc:
+                raise ValueError(
+                    "Administrator passwords must be at least 12 characters and "
+                    "include uppercase, lowercase, and numeric characters."
+                ) from exc
 
         admin_user = User(
             name=name.strip(),
@@ -250,25 +287,22 @@ class AuthService:
         user.invitation_token_hash = None
         user.invitation_expires_at = None
 
-        # If role is Customer and no customer_id is linked yet, link or create
+        # Legacy customer association: create a separate record rather than inferring
+        # ownership from a matching email address.
         if user.role == "Customer" and not user.customer_id:
-            matched_customer = db.query(Customer).filter(Customer.email.ilike(user.email)).first()
-            if matched_customer:
-                user.customer_id = matched_customer.id
-            else:
-                new_customer = Customer(
-                    name=user.name,
-                    contact=user.phone or user.email,
-                    email=user.email,
-                    phone=user.phone,
-                    location="Not specified",
-                    property_type="Residential",
-                    status="Active",
-                    customer_since=now.strftime("%d %b %Y"),
-                )
-                db.add(new_customer)
-                db.flush()
-                user.customer_id = new_customer.id
+            new_customer = Customer(
+                name=user.name,
+                contact=user.phone or user.email,
+                email=user.email,
+                phone=user.phone,
+                location="Not specified",
+                property_type="Residential",
+                status="Active",
+                customer_since=now.strftime("%d %b %Y"),
+            )
+            db.add(new_customer)
+            db.flush()
+            user.customer_id = new_customer.id
 
         CRMService.record_activity(
             db=db,

@@ -56,7 +56,7 @@ export default function SignupPage({ theme, navigate }) {
       } else if (err.status === 422) {
         setError('Please check the entered information and meet all password criteria.');
       } else {
-        setError('Something went wrong, please try again');
+        setError(err.message || 'Something went wrong, please try again');
       }
     } finally {
       setIsSubmitting(false);

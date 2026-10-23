@@ -47,7 +47,7 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
         if not user:
             AuthService.bootstrap_admin(
                 db=db,
-                name="Solara Test User",
+                name="Solara Admin" if role.strip().casefold() == "admin" else "Solara Test User",
                 email=email,
                 password="StrongPass123",
                 role=role,
@@ -68,5 +68,4 @@ def auth_headers(client: TestClient, role: str = "Admin", email: str = "admin@so
     assert login_response.status_code == 200
     token = login_response.json()["access_token"]
     return {"Authorization": f"Bearer {token}"}
-
 

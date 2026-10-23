@@ -35,6 +35,28 @@ def test_public_signup_cannot_create_admin(client):
     assert "invitation_token_hash" not in data
 
 
+def test_bootstrap_admin_is_idempotent_without_password_reset():
+    with SessionLocal() as db:
+        admin = AuthService.bootstrap_admin(
+            db=db,
+            name="Initial Admin",
+            email="seed-idempotent@solara.test",
+            password="SecureInitialAdmin123",
+        )
+        original_hash = admin.password_hash
+
+        rerun = AuthService.bootstrap_admin(
+            db=db,
+            name="Changed Name",
+            email="seed-idempotent@solara.test",
+            password="DifferentAdminPassword456",
+        )
+
+        assert rerun.id == admin.id
+        assert rerun.password_hash == original_hash
+        assert rerun.name == "Initial Admin"
+
+
 def test_admin_invitation_and_activation_workflow(client):
     """Admin creates an invitation with secure single-use token, user activates password."""
     admin_auth = auth_headers(client, role="Admin", email="superadmin@solara.io")

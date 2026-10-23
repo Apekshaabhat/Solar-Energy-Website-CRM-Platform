@@ -15,7 +15,7 @@ class SiteSurvey(Base):
     assigned_to = Column(String(100), default="Rahul", nullable=False)  # Surveyor name string
     status = Column(String(50), default="Scheduled", nullable=False)  # Scheduled, In Progress, Completed, Cancelled
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
-    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    project_id = Column(Integer, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
     lead_id = Column(Integer, ForeignKey("leads.id", ondelete="SET NULL"), nullable=True, index=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     roof_information = Column(Text, nullable=True)

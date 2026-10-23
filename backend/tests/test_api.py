@@ -27,16 +27,57 @@ def staff_headers(client, email, role):
     return headers
 
 
-def test_seeded_admin_login_uses_dev_password(client):
+def test_seeded_admin_login_uses_configured_password_without_resetting_it(client, monkeypatch):
+    from app.core.config import settings
     from seed import seed_data
+
+    admin_password = "SecureSeedAdminPassword123"
+    monkeypatch.setattr(settings, "SEED_ADMIN_PASSWORD", admin_password)
     seed_data()
+    with SessionLocal() as db:
+        admin = db.query(User).filter(User.email == "admin@solara.com").one()
+        original_password_hash = admin.password_hash
+
+    seed_data()
+    with SessionLocal() as db:
+        admin = db.query(User).filter(User.email == "admin@solara.com").one()
+        assert admin.password_hash == original_password_hash
+
     response = client.post(
         "/api/v1/auth/login",
-        json={"email": "admin@solara.com", "password": "admin123"},
+        json={"email": "admin@solara.com", "password": admin_password},
     )
     assert response.status_code == 200
     assert response.json()["user"]["email"] == "admin@solara.com"
     assert response.json()["user"]["role"] == "Admin"
+
+
+def test_seed_creates_admin_when_database_already_has_users(client, monkeypatch):
+    from app.core.config import settings
+    from seed import seed_data
+
+    admin_password = "SecureSeedAdminPassword123"
+    monkeypatch.setattr(settings, "SEED_ADMIN_PASSWORD", admin_password)
+    with SessionLocal() as db:
+        existing_user = User(
+            name="Existing Customer",
+            email="existing-seed-customer@solara.test",
+            password_hash=get_password_hash("StrongPassword123"),
+            role="Customer",
+            status="Active",
+        )
+        db.add(existing_user)
+        db.commit()
+        existing_user_id = existing_user.id
+
+    seed_data()
+
+    with SessionLocal() as db:
+        existing_user = db.query(User).filter(User.id == existing_user_id).one()
+        admin = db.query(User).filter(User.email == "admin@solara.com").one()
+        assert existing_user.role == "Customer"
+        assert admin.role == "Admin"
+        assert admin.status == "Active"
 
 
 def test_register_login_and_me(client):
@@ -1154,7 +1195,7 @@ def test_customer_profile_uses_explicit_account_relationship(client):
         json={
             "name": "Profile Customer",
             "email": "profile-customer@solara.test",
-            "password": "password123",
+            "password": "StrongPassword123",
         },
     )
     second_register = client.post(
@@ -1162,15 +1203,21 @@ def test_customer_profile_uses_explicit_account_relationship(client):
         json={
             "name": "Other Customer",
             "email": "other-customer@solara.test",
-            "password": "password123",
+            "password": "StrongPassword123",
         },
     )
     assert first_register.status_code == second_register.status_code == 201
 
+    with SessionLocal() as db:
+        db.query(User).filter(
+            User.email.in_(["profile-customer@solara.test", "other-customer@solara.test"])
+        ).update({"status": "Active"}, synchronize_session=False)
+        db.commit()
+
     def login_headers(email):
         response = client.post(
             "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
+            json={"email": email, "password": "StrongPassword123"},
         )
         assert response.status_code == 200
         token = response.json()["access_token"]
@@ -1624,12 +1671,18 @@ def test_project_access_is_scoped_to_roles_assignments_and_customers(client):
     def register_customer(name, email):
         register = client.post(
             "/api/v1/auth/register",
-            json={"name": name, "email": email, "password": "password123"},
+            json={"name": name, "email": email, "password": "StrongPassword123"},
         )
         assert register.status_code == 201
+        with SessionLocal() as db:
+            db.query(User).filter(User.email == email).update(
+                {"status": "Active"},
+                synchronize_session=False,
+            )
+            db.commit()
         login = client.post(
             "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
+            json={"email": email, "password": "StrongPassword123"},
         )
         assert login.status_code == 200
         return register.json()["data"], {"Authorization": "Bearer " + login.json()["access_token"]}
@@ -2178,6 +2231,9 @@ def test_site_survey_export_requires_staff_and_escapes_formulas(client):
 
 
 def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
+    future_survey_date = (
+        datetime.now(timezone.utc).date() + timedelta(days=2)
+    ).isoformat()
     admin_headers = auth_headers(client, email="survey-admin@solara.test")
     manager_headers = staff_headers(client, "survey-manager@solara.test", "Manager")
     assigned_headers = staff_headers(client, "survey-assigned@solara.test", "Sales Rep")
@@ -2186,15 +2242,17 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
     def register_customer(name, email):
         registered = client.post(
             "/api/v1/auth/register",
-            json={"name": name, "email": email, "password": "password123"},
+            json={"name": name, "email": email, "password": "StrongPassword123"},
         )
         assert registered.status_code == 201
-        token = client.post(
-            "/api/v1/auth/login",
-            json={"email": email, "password": "password123"},
-        )
-        assert token.status_code == 200
-        return registered.json()["data"], {"Authorization": "Bearer " + token.json()["access_token"]}
+        with SessionLocal() as db:
+            customer_user = db.query(User).filter(User.email == email).one()
+            customer_user.status = "Active"
+            customer_id = customer_user.id
+            token_version = customer_user.token_version
+            db.commit()
+        token = create_access_token(subject=customer_id, token_version=token_version)
+        return registered.json()["data"], {"Authorization": "Bearer " + token}
 
     first_user, first_customer_headers = register_customer(
         "Survey Customer One", "survey-customer-one@solara.test"
@@ -2284,7 +2342,7 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
         json={
             "customer_name": "Public Booking",
             "location": "Pune",
-            "survey_date": "2026-10-21",
+            "survey_date": future_survey_date,
             "time_slot": "11:00 AM",
             "customer_id": customer_two_id,
             "project_id": project_two_id,
@@ -2304,7 +2362,7 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
         json={
             "customer_name": "Survey Customer One",
             "location": "Pune",
-            "survey_date": "2026-10-22",
+            "survey_date": future_survey_date,
             "time_slot": "12:00 PM",
             "customer_id": customer_one_id,
             "project_id": project_one_id,
@@ -2323,7 +2381,7 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
         json={
             "customer_name": "Survey Customer One",
             "location": "Pune",
-            "survey_date": "2026-10-23",
+            "survey_date": future_survey_date,
             "time_slot": "01:00 PM",
             "customer_id": customer_two_id,
             "project_id": project_two_id,
@@ -2449,6 +2507,8 @@ def test_site_survey_access_is_scoped_and_relationships_are_validated(client):
         f"/api/v1/site-surveys/{survey_two_id}", headers=manager_headers
     )
     assert deleted.status_code == 200
-    assert client.get(
+    cancelled_survey = client.get(
         f"/api/v1/site-surveys/{survey_two_id}", headers=admin_headers
-    ).status_code == 404
+    )
+    assert cancelled_survey.status_code == 200
+    assert cancelled_survey.json()["data"]["status"] == "Cancelled"

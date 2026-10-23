@@ -12,13 +12,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from slowapi.errors import RateLimitExceeded
 
-from app.core.database import Base, SessionLocal, engine
+from app.core.database import engine
 from app.core.limiter import limiter
 from app.models.token import RevokedToken, PasswordResetToken
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.models.user import User
 import app.models  # ensure models are registered
 from app.routers import (
     auth_router,
@@ -68,8 +67,10 @@ async def lifespan(app: FastAPI):
             command.upgrade(alembic_cfg, "head")
             logger.info("Database migrations successfully applied to head.")
         else:
-            Base.metadata.create_all(bind=engine)
-            logger.info("Database tables verified.")
+            logger.info(
+                "Automatic schema creation is disabled for SQLite; "
+                "tests initialize their schema explicitly and standalone databases require Alembic."
+            )
     except Exception as e:
         logger.critical(f"Database schema initialization failure: {e}")
         raise RuntimeError(f"Database schema initialization failed: {e}") from e
@@ -84,16 +85,6 @@ async def lifespan(app: FastAPI):
             logger.info("Cleaned up expired rows in revoked_tokens and password_reset_tokens.")
     except Exception as e:
         logger.warning(f"Error cleaning up expired tokens at startup: {e}")
-
-    # Seed initial data if empty
-    try:
-        with Session(engine) as db:
-            if db.query(User).count() == 0 and "sqlite" not in settings.DATABASE_URL:
-                logger.info("No users found. Running default seed data for development.")
-                from seed import seed_data
-                seed_data()
-    except Exception as e:
-        logger.warning(f"Error running seed data on empty database: {e}")
 
     yield
     # Shutdown

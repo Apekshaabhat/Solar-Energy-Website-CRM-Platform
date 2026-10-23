@@ -4,11 +4,12 @@ from sqlalchemy.orm import Session
 import jwt
 
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import SessionLocal, engine
 from app.core.security import get_password_hash, create_access_token, decode_access_token
 from app.core.limiter import limiter
 from app.models.user import User
 from app.models.token import RevokedToken, PasswordResetToken
+from app.services.auth_service import AuthService
 from .conftest import auth_headers
 
 
@@ -427,6 +428,114 @@ def test_token_invalid_after_password_change(client):
 
     new_me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {new_token}"})
     assert new_me.status_code == 200
+
+
+def test_user_management_changes_invalidate_existing_sessions(client):
+    admin_headers = auth_headers(
+        client,
+        role="Admin",
+        email="session-change-admin@solara.test",
+    )
+    with SessionLocal() as db:
+        target = AuthService.bootstrap_admin(
+            db=db,
+            name="Session Change Target",
+            email="session-change-target@solara.test",
+            password="InitialPassword123!",
+            role="Sales Rep",
+        )
+        target_id = target.id
+
+    login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "session-change-target@solara.test",
+            "password": "InitialPassword123!",
+        },
+    )
+    assert login.status_code == 200
+    old_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    assert client.get("/api/v1/auth/me", headers=old_headers).status_code == 200
+
+    changed_role = client.patch(
+        f"/api/v1/users/{target_id}",
+        headers=admin_headers,
+        json={"role": "Support"},
+    )
+    assert changed_role.status_code == 200
+    assert client.get("/api/v1/auth/me", headers=old_headers).status_code == 401
+
+    re_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "session-change-target@solara.test",
+            "password": "InitialPassword123!",
+        },
+    )
+    assert re_login.status_code == 200
+    pre_deactivation_headers = {
+        "Authorization": f"Bearer {re_login.json()['access_token']}"
+    }
+
+    deactivated = client.patch(
+        f"/api/v1/users/{target_id}",
+        headers=admin_headers,
+        json={"status": "Inactive"},
+    )
+    assert deactivated.status_code == 200
+    reactivated = client.patch(
+        f"/api/v1/users/{target_id}",
+        headers=admin_headers,
+        json={"status": "Active"},
+    )
+    assert reactivated.status_code == 200
+    assert client.get(
+        "/api/v1/auth/me",
+        headers=pre_deactivation_headers,
+    ).status_code == 401
+
+    re_login = client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "session-change-target@solara.test",
+            "password": "InitialPassword123!",
+        },
+    )
+    assert re_login.status_code == 200
+    pre_password_change_headers = {
+        "Authorization": f"Bearer {re_login.json()['access_token']}"
+    }
+    forced_password = client.patch(
+        f"/api/v1/users/{target_id}",
+        headers=admin_headers,
+        json={"password": "AdminChangedPassword123"},
+    )
+    assert forced_password.status_code == 200
+    assert client.get(
+        "/api/v1/auth/me",
+        headers=pre_password_change_headers,
+    ).status_code == 401
+    assert client.post(
+        "/api/v1/auth/login",
+        json={
+            "email": "session-change-target@solara.test",
+            "password": "AdminChangedPassword123",
+        },
+    ).status_code == 200
+
+
+def test_admin_role_check_normalizes_existing_role_values():
+    from app.dependencies.auth import require_admin
+
+    admin = User(
+        name="Normalized Admin",
+        email="normalized-admin@solara.test",
+        password_hash="unused",
+        role=" admin ",
+        status="Active",
+    )
+
+    assert require_admin(current_user=admin) is admin
 
 
 def test_account_activation_invitation_flow(client):

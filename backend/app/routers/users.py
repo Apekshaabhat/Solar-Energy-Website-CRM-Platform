@@ -85,10 +85,18 @@ def invite_user(
     current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
-    user, _ = UserService.invite_user(db, request, acting_user=current_user)
+    user, activation_token = UserService.invite_user(db, request, acting_user=current_user)
+    if not EmailService.send_account_invitation_email(user.email, activation_token):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The user was created, but the activation email could not be sent. "
+                "Check the SMTP configuration and resend the invitation."
+            ),
+        )
     return APIResponse(
         success=True,
-        message="User invitation created successfully.",
+        message="User invitation created and activation email sent successfully.",
         data=UserResponse.model_validate(user),
     )
 
@@ -142,7 +150,14 @@ def create_user(
     db.commit()
 
     # Emit invitation email / dev console log
-    EmailService.send_account_invitation_email(user.email, raw_token)
+    if not EmailService.send_account_invitation_email(user.email, raw_token):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "The user was created, but the activation email could not be sent. "
+                "Check the SMTP configuration and resend the invitation."
+            ),
+        )
 
     return APIResponse(
         success=True,
@@ -205,7 +220,10 @@ def delete_user(
     "/backfill-customers",
     response_model=APIResponse[dict],
     summary="Backfill Customer account linkings",
-    description="Reconciles Customer login accounts with CRM customer records.",
+    description=(
+        "Creates CRM customer records for Customer accounts without a legacy customer association. "
+        "Existing records are not matched by email or phone."
+    ),
 )
 def backfill_customers(
     current_user: User = Depends(require_roles(["Admin"])),

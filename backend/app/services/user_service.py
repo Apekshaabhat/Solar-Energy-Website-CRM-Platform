@@ -14,6 +14,7 @@ from app.models.lead import Lead
 from app.models.project import Project
 from app.models.site_survey import SiteSurvey
 from app.models.activity import Activity
+from app.models.token import PasswordResetToken
 from app.schemas.user import UserInviteRequest, UserUpdate, ALLOWED_ROLES, ALLOWED_STATUSES
 from app.services.crm_service import CRMService
 from app.services.notification_service import NotificationService
@@ -34,7 +35,12 @@ class UserService:
         and is NEVER exposed directly in standard public API responses or logs.
         """
         email_clean = request.email.lower().strip()
-        existing = db.query(User).filter(User.email == email_clean).first()
+        existing = (
+            db.query(User)
+            .filter(User.email == email_clean)
+            .with_for_update()
+            .first()
+        )
 
         if existing:
             if existing.status == "Active":
@@ -42,8 +48,32 @@ class UserService:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="A user with this email address already exists and is active.",
                 )
+            now = datetime.now(timezone.utc)
+            active_token = (
+                db.query(PasswordResetToken.id)
+                .filter(
+                    PasswordResetToken.user_id == existing.id,
+                    PasswordResetToken.token_type == "activate",
+                    PasswordResetToken.used_at.is_(None),
+                    PasswordResetToken.expires_at > now,
+                )
+                .first()
+            )
+            invitation_expiry = existing.invitation_expires_at
+            if invitation_expiry is not None and invitation_expiry.tzinfo is None:
+                invitation_expiry = invitation_expiry.replace(tzinfo=timezone.utc)
+            if active_token or (
+                existing.invitation_token_hash
+                and invitation_expiry
+                and invitation_expiry > now
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A valid invitation already exists for this email address.",
+                )
             # Re-invite an existing invited/inactive account
             user = existing
+            user.token_version = (user.token_version or 0) + 1
             user.name = request.name.strip()
             user.role = request.role
             user.status = "Invited"
@@ -66,6 +96,14 @@ class UserService:
         # Generate single-use token and store SHA-256 hash
         raw_token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+        db.query(PasswordResetToken).filter(
+            PasswordResetToken.user_id == user.id,
+            PasswordResetToken.token_type == "activate",
+            PasswordResetToken.used_at.is_(None),
+        ).update(
+            {"used_at": datetime.now(timezone.utc)},
+            synchronize_session=False,
+        )
         user.invitation_token_hash = token_hash
         user.invitation_expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
 
@@ -159,8 +197,12 @@ class UserService:
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+        current_role = current_user.role.strip().casefold()
+        target_role = user.role.strip().casefold()
+        session_invalidated = False
+
         # Managers cannot touch Admin accounts
-        if current_user.role == "Manager" and user.role == "Admin":
+        if current_role == "manager" and target_role == "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Managers cannot modify administrator accounts.",
@@ -176,6 +218,7 @@ class UserService:
                     detail="Email address is already in use by another account.",
                 )
             user.email = target_email
+            session_invalidated = True
 
         if request.name is not None:
             user.name = request.name.strip()
@@ -185,7 +228,7 @@ class UserService:
 
         # Role change validation
         if request.role is not None and request.role != user.role:
-            if current_user.role != "Admin":
+            if current_role != "admin":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only administrators can update user roles.",
@@ -211,6 +254,7 @@ class UserService:
 
             old_role = user.role
             user.role = request.role
+            session_invalidated = True
             activity = Activity(
                 entity_type="user",
                 entity_id=user.id,
@@ -236,12 +280,12 @@ class UserService:
 
         # Status change validation (Deactivation / Activation)
         if request.status is not None and request.status != user.status:
-            if current_user.role not in ["Admin", "Manager"]:
+            if current_role not in {"admin", "manager"}:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to change account status.",
                 )
-            if current_user.role == "Manager" and user.role in ["Admin", "Manager"]:
+            if current_role == "manager" and user.role.strip().casefold() in {"admin", "manager"}:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Managers cannot modify status of administrative accounts.",
@@ -261,6 +305,7 @@ class UserService:
 
             old_status = user.status
             user.status = request.status
+            session_invalidated = True
             activity = Activity(
                 entity_type="user",
                 entity_id=user.id,
@@ -290,12 +335,16 @@ class UserService:
 
         if getattr(request, "password", None):
             # Only admin can force reset password, or manager for non-admin
-            if current_user.role != "Admin":
+            if current_role != "admin":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Only administrators can update account passwords directly.",
                 )
             user.password_hash = get_password_hash(request.password)
+            session_invalidated = True
+
+        if session_invalidated:
+            user.token_version = (user.token_version or 0) + 1
 
         db.commit()
         db.refresh(user)
@@ -382,8 +431,8 @@ class UserService:
     @staticmethod
     def backfill_customer_users(db: Session) -> Dict[str, int]:
         """
-        Reconcile Customer user accounts with Customer CRM records.
-        Safe backfill: matches by normalized email or phone.
+        Create legacy CRM customer associations for unlinked Customer accounts.
+        Existing customer records are never linked based on email or phone.
         """
         unlinked_users = db.query(User).filter(
             User.role == "Customer",
@@ -394,30 +443,20 @@ class UserService:
         created_count = 0
 
         for user in unlinked_users:
-            # 1. Match by email
-            matched = db.query(Customer).filter(Customer.email.ilike(user.email.strip())).first()
-            if not matched and user.phone:
-                matched = db.query(Customer).filter(Customer.phone == user.phone.strip()).first()
-
-            if matched:
-                user.customer_id = matched.id
-                linked_count += 1
-            else:
-                # Create corresponding customer record
-                new_customer = Customer(
-                    name=user.name,
-                    contact=user.phone or user.email,
-                    email=user.email,
-                    phone=user.phone,
-                    location="Not specified",
-                    property_type="Residential",
-                    status="Active",
-                    customer_since=datetime.now(timezone.utc).strftime("%d %b %Y"),
-                )
-                db.add(new_customer)
-                db.flush()
-                user.customer_id = new_customer.id
-                created_count += 1
+            new_customer = Customer(
+                name=user.name,
+                contact=user.phone or user.email,
+                email=user.email,
+                phone=user.phone,
+                location="Not specified",
+                property_type="Residential",
+                status="Active",
+                customer_since=datetime.now(timezone.utc).strftime("%d %b %Y"),
+            )
+            db.add(new_customer)
+            db.flush()
+            user.customer_id = new_customer.id
+            created_count += 1
 
         db.commit()
         return {"unlinked_found": len(unlinked_users), "linked_to_existing": linked_count, "created_new_customer": created_count}

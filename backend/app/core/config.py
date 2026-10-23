@@ -1,7 +1,33 @@
-from typing import List, Literal, Union
+from typing import List, Optional, Union
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+_DEFAULT_SECRET_KEY = "solara-crm-development-only-secret-key-change-before-production"
+_DEFAULT_ADMIN_PASSWORDS = {"admin123", "password123", "changeme", "your-password"}
+
+
+def validate_admin_seed_password(password: Optional[str]) -> str:
+    normalized = (password or "").strip()
+    lowered = normalized.lower()
+    placeholder_text = lowered.replace("_", "-")
+    if (
+        len(normalized) < 12
+        or lowered in _DEFAULT_ADMIN_PASSWORDS
+        or any(
+            marker in placeholder_text
+            for marker in ("replace-with", "change-me", "placeholder", "your-")
+        )
+        or not any(character.isupper() for character in normalized)
+        or not any(character.islower() for character in normalized)
+        or not any(character.isdigit() for character in normalized)
+    ):
+        raise ValueError(
+            "SEED_ADMIN_PASSWORD must be at least 12 characters and include "
+            "uppercase, lowercase, and numeric characters."
+        )
+    return normalized
 
 
 class Settings(BaseSettings):
@@ -17,7 +43,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+psycopg2://postgres:PostgreSQL@localhost:5432/solar_crm"
     
     # JWT Security & Session Lifetimes
-    SECRET_KEY: str = "solara-crm-production-secret-key-change-in-env-at-least-32-chars-long"
+    SECRET_KEY: str = _DEFAULT_SECRET_KEY
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # Legacy default
     ACCESS_TOKEN_EXPIRE_HOURS: int = 8  # Default session lifetime (remember_me=False)
@@ -25,7 +51,7 @@ class Settings(BaseSettings):
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
     ACCOUNT_ACTIVATION_TOKEN_EXPIRE_HOURS: int = 24
 
-    SEED_ADMIN_PASSWORD: str = "admin123"
+    SEED_ADMIN_PASSWORD: Optional[str] = None
 
     # Rate Limiting
     AUTH_RATE_LIMIT: str = "5/minute"
@@ -67,6 +93,34 @@ class Settings(BaseSettings):
         if isinstance(value, list):
             return value
         return value
+
+    @model_validator(mode="after")
+    def validate_production_security(self):
+        environment = self.ENVIRONMENT.strip().lower()
+        is_production = environment in {"production", "prod", "release"}
+        if not is_production:
+            return self
+
+        if self.DEBUG:
+            raise ValueError("DEBUG must be false in production.")
+
+        secret = self.SECRET_KEY.strip()
+        placeholder_text = secret.lower().replace("_", "-")
+        if (
+            len(secret) < 32
+            or secret == _DEFAULT_SECRET_KEY
+            or secret.lower() in {"secret", "changeme", "your-secret-key"}
+            or any(
+                marker in placeholder_text
+                for marker in ("replace-with", "change-me", "placeholder", "your-")
+            )
+        ):
+            raise ValueError(
+                "Production SECRET_KEY must be a unique secret of at least 32 characters."
+            )
+
+        validate_admin_seed_password(self.SEED_ADMIN_PASSWORD)
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

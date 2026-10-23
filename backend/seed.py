@@ -2,7 +2,7 @@
 import logging
 import secrets
 
-from app.core.config import settings
+from app.core.config import settings, validate_admin_seed_password
 from app.core.database import SessionLocal
 from app.core.security import get_password_hash
 from app.models.user import User
@@ -19,30 +19,50 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("seed")
 
 
+def ensure_seed_admin(db):
+    admin = db.query(User).filter(User.email == "admin@solara.com").first()
+    if admin:
+        if admin.role.strip().casefold() != "admin":
+            raise RuntimeError(
+                "admin@solara.com already exists but is not an administrator; "
+                "resolve the account explicitly before seeding."
+            )
+        return admin
+
+    try:
+        admin_password = validate_admin_seed_password(settings.SEED_ADMIN_PASSWORD)
+    except ValueError as exc:
+        raise RuntimeError(
+            "Set a unique SEED_ADMIN_PASSWORD of at least 12 characters "
+            "with uppercase, lowercase, and numeric characters before seeding."
+        ) from exc
+
+    admin = User(
+        name="Alex Sterling",
+        email="admin@solara.com",
+        password_hash=get_password_hash(admin_password),
+        phone="+1 (555) 234-5678",
+        role="Admin",
+        status="Active",
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    logger.info("Created the initial administrator account.")
+    return admin
+
+
 def seed_data():
     db = SessionLocal()
     try:
-        # 1. Seed Users
-        if db.query(User).count() == 0:
-            admin_password = (
-                settings.SEED_ADMIN_PASSWORD.get_secret_value()
-                if hasattr(settings.SEED_ADMIN_PASSWORD, "get_secret_value")
-                else str(settings.SEED_ADMIN_PASSWORD or "admin123")
-            )
-            if len(admin_password) < 6:
-                raise RuntimeError(
-                    "Set SEED_ADMIN_PASSWORD in backend/.env to a value of at least 6 characters before seeding."
-                )
+        # Seed the administrator independently; never reset an existing password.
+        seed_demo_users = db.query(User).count() == 0
+        admin_user = ensure_seed_admin(db)
+
+        # 1. Seed demo staff only for a new user table.
+        if seed_demo_users:
             logger.info("Seeding users...")
             users = [
-                User(
-                    name="Alex Sterling",
-                    email="admin@solara.com",
-                    password_hash=get_password_hash(admin_password),
-                    phone="+1 (555) 234-5678",
-                    role="Admin",
-                    status="Active",
-                ),
                 User(
                     name="Marcus Chen",
                     email="marcus.c@solara.com",
@@ -78,8 +98,6 @@ def seed_data():
             ]
             db.add_all(users)
             db.commit()
-
-        admin_user = db.query(User).filter(User.email == "admin@solara.com").first()
 
         # 2. Seed Customers
         if db.query(Customer).count() == 0:
