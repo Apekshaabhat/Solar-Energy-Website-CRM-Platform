@@ -22,7 +22,7 @@ def ensure_utc(dt):
 
 
 def test_signup_cannot_set_role(client):
-    """Public signup cannot set role or become Admin; always gets Customer and Pending."""
+    """Public signup cannot set role or become Admin; always gets an active Customer."""
     payload = {
         "name": "Attacker",
         "email": "attacker@example.com",
@@ -37,7 +37,7 @@ def test_signup_cannot_set_role(client):
         user = db.query(User).filter(User.email == "attacker@example.com").first()
         assert user is not None
         assert user.role == "Customer"
-        assert user.status == "Pending"
+        assert user.status == "Active"
 
     # Verify duplicate signup returns identical generic response without revealing account existence
     dup_res = client.post("/api/v1/auth/register", json=payload)
@@ -83,14 +83,14 @@ def test_weak_password_rejected(client):
     assert res.status_code == 201
 
 
-def test_inactive_user_rejected(client):
-    """Inactive/Pending/Invited users are rejected at login with generic 401 error, and rejected by get_current_user."""
+def test_pending_staff_user_rejected(client):
+    """Pending staff users remain blocked from login and get_current_user."""
     with Session(engine) as db:
         user = User(
             name="Pending User",
             email="pending@test.com",
             password_hash=get_password_hash("StrongPassword123"),
-            role="Customer",
+            role="Sales Rep",
             status="Pending",
             token_version=0,
         )

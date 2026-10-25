@@ -1,23 +1,17 @@
-from datetime import datetime, timedelta, timezone
-
 from sqlalchemy.orm import Session
 
 from app.core.database import engine
-from app.models.token import PasswordResetToken
 from app.models.user import User
 from tests.conftest import auth_headers
 
 
-def test_signup_sends_activation_email_and_activates_account(client, monkeypatch):
-    sent_emails = []
-
-    def capture_activation_email(to_email, token):
-        sent_emails.append((to_email, token))
-        return True
+def test_signup_does_not_require_email_activation(client, monkeypatch):
+    def fail_if_email_sent(*args, **kwargs):
+        raise AssertionError("Public signup must not send an activation email")
 
     monkeypatch.setattr(
-        "app.routers.auth.EmailService.send_account_invitation_email",
-        capture_activation_email,
+        "app.services.email_service.EmailService.send_account_invitation_email",
+        fail_if_email_sent,
     )
     signup = client.post(
         "/api/v1/auth/register",
@@ -29,52 +23,24 @@ def test_signup_sends_activation_email_and_activates_account(client, monkeypatch
     )
 
     assert signup.status_code == 201
-    assert "activation link" in signup.json()["message"].lower()
-    assert len(sent_emails) == 1
-    assert sent_emails[0][0] == "activation@example.com"
+    assert "log in" in signup.json()["message"].lower()
+    assert signup.json()["data"]["status"] == "Active"
 
-    with Session(engine) as db:
-        user = db.query(User).filter_by(email="activation@example.com").one()
-        activation = (
-            db.query(PasswordResetToken)
-            .filter_by(user_id=user.id, token_type="activate")
-            .one()
-        )
-        assert user.status == "Pending"
-        assert activation.token_hash != sent_emails[0][1]
-
-    activated = client.post(
-        "/api/v1/auth/activate",
-        json={
-            "token": sent_emails[0][1],
-            "password": "NewStrongPassword123",
-            "confirm_password": "NewStrongPassword123",
-        },
-    )
-
-    assert activated.status_code == 200
     with Session(engine) as db:
         user = db.query(User).filter_by(email="activation@example.com").one()
         assert user.status == "Active"
 
-
-def test_repeated_pending_signup_does_not_replace_or_resend_valid_token(
-    client,
-    monkeypatch,
-):
-    sent_tokens = []
-
-    def capture_activation_email(to_email, token):
-        sent_tokens.append(token)
-        return True
-
-    monkeypatch.setattr(
-        "app.routers.auth.EmailService.send_account_invitation_email",
-        capture_activation_email,
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "activation@example.com", "password": "StrongPassword123"},
     )
+    assert login.status_code == 200
+
+
+def test_repeated_signup_does_not_change_existing_account(client):
     payload = {
-        "name": "Single Invitation Customer",
-        "email": "single-invitation@example.com",
+        "name": "Registered Customer",
+        "email": "registered-customer@example.com",
         "password": "StrongPassword123",
     }
 
@@ -82,76 +48,35 @@ def test_repeated_pending_signup_does_not_replace_or_resend_valid_token(
     repeated_signup = client.post("/api/v1/auth/register", json=payload)
 
     assert first_signup.status_code == repeated_signup.status_code == 201
-    assert len(sent_tokens) == 1
-    activated = client.post(
-        "/api/v1/auth/activate",
-        json={"token": sent_tokens[0], "password": "NewStrongPassword123"},
+    assert first_signup.json()["data"]["status"] == "Active"
+    assert repeated_signup.json()["data"] is None
+
+
+def test_legacy_pending_customer_can_login_without_activation(client):
+    signup = client.post(
+        "/api/v1/auth/register",
+        json={
+            "name": "Legacy Customer",
+            "email": "legacy-customer@example.com",
+            "password": "StrongPassword123",
+        },
     )
-    assert activated.status_code == 200
-
-
-def test_signup_only_reissues_activation_after_existing_token_expires(
-    client,
-    monkeypatch,
-):
-    payload = {
-        "name": "Retry Customer",
-        "email": "retry-activation@example.com",
-        "password": "StrongPassword123",
-    }
-    sent_tokens = []
-
-    def fail_delivery(to_email, token):
-        sent_tokens.append(token)
-        return False
-
-    monkeypatch.setattr(
-        "app.routers.auth.EmailService.send_account_invitation_email",
-        fail_delivery,
-    )
-    failed_signup = client.post("/api/v1/auth/register", json=payload)
-    assert failed_signup.status_code == 503
-    assert failed_signup.json()["success"] is False
-
-    def capture_retry(to_email, token):
-        sent_tokens.append(token)
-        return True
-
-    monkeypatch.setattr(
-        "app.routers.auth.EmailService.send_account_invitation_email",
-        capture_retry,
-    )
-    duplicate_signup = client.post("/api/v1/auth/register", json=payload)
-    assert duplicate_signup.status_code == 201
-    assert len(sent_tokens) == 1
+    assert signup.status_code == 201
 
     with Session(engine) as db:
-        user = db.query(User).filter_by(email=payload["email"]).one()
-        activation = (
-            db.query(PasswordResetToken)
-            .filter_by(user_id=user.id, token_type="activate")
-            .one()
-        )
-        activation.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+        user = db.query(User).filter_by(email="legacy-customer@example.com").one()
+        user.status = "Pending"
         db.commit()
 
-    retried_signup = client.post("/api/v1/auth/register", json=payload)
-
-    assert retried_signup.status_code == 201
-    assert len(sent_tokens) == 2
-    assert sent_tokens[0] != sent_tokens[1]
-
-    expired_link = client.post(
-        "/api/v1/auth/activate",
-        json={"token": sent_tokens[0], "password": "NewStrongPassword123"},
+    login = client.post(
+        "/api/v1/auth/login",
+        json={"email": "legacy-customer@example.com", "password": "StrongPassword123"},
     )
-    assert expired_link.status_code == 400
+    assert login.status_code == 200
 
-    valid_link = client.post(
-        "/api/v1/auth/activate",
-        json={"token": sent_tokens[1], "password": "NewStrongPassword123"},
-    )
-    assert valid_link.status_code == 200
+    with Session(engine) as db:
+        user = db.query(User).filter_by(email="legacy-customer@example.com").one()
+        assert user.status == "Active"
 
 
 def test_admin_invitation_sends_activation_email(client, monkeypatch):

@@ -29,9 +29,9 @@ copy .env.example .env
 
 Configure `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, and token settings in `.env`. Generate a unique `SECRET_KEY` of at least 32 characters; do not use the example placeholder. Production requires `ENVIRONMENT=production`, `DEBUG=False`, a unique signing key, and a strong `SEED_ADMIN_PASSWORD`.
 
-### Gmail activation emails
+### Email configuration
 
-New customer signups and administrator invitations send single-use activation links by email. For local development, the default `EMAIL_BACKEND=console` prints the link in the backend terminal; it does not send email.
+Customer signup does not require email verification. Administrator invitations use single-use activation links. For local development, the default `EMAIL_BACKEND=console` prints invitation links in the backend terminal; it does not send email.
 
 To send through Gmail, enable 2-Step Verification on the sending Google account, create a Google App Password, and set these values in `backend/.env`:
 
@@ -46,7 +46,7 @@ EMAILS_FROM_EMAIL=your.name@gmail.com
 FRONTEND_URL=http://localhost:5173
 ```
 
-Use the App Password, not the account's regular password. Keep it private and do not commit `.env`. Restart the backend after changing settings. If delivery fails, the API reports that the activation email could not be sent; correct the SMTP configuration and retry signup to send a fresh activation link. The previous activation link is invalidated when a fresh one is issued.
+Use the App Password, not the account's regular password. Keep it private and do not commit `.env`. Restart the backend after changing settings. If invitation email delivery fails, correct the SMTP configuration and retry the invitation. The previous activation link is invalidated when a fresh one is issued.
 
 ---
 

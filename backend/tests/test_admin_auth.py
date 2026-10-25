@@ -28,7 +28,7 @@ def test_public_signup_cannot_create_admin(client):
     assert resp.status_code == 201
     data = resp.json()["data"]
     assert data["role"] == "Customer"
-    assert data["status"] in ["Active", "Pending"]
+    assert data["status"] == "Active"
 
     # Token and secret hashes should not be exposed
     assert "password_hash" not in data

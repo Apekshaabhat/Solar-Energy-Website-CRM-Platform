@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowRight, Mail, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import AuthShell from './AuthShell';
 import { FormField } from './FormField';
 import authApi from '../api/auth';
@@ -80,10 +80,10 @@ export default function SignupPage({ theme, navigate }) {
   return (
     <AuthShell
       eyebrow="Get started"
-      title={submitted ? "Check your email" : "Create your account"}
+      title={submitted ? "Account created" : "Create your account"}
       subtitle={
         submitted
-          ? "We've sent an activation link to your email address."
+          ? "Your SOLARA account is ready to use."
           : "Set up your free SOLARA account to estimate savings, request quotes, and manage clean energy installations."
       }
       footer={footer}
@@ -95,15 +95,15 @@ export default function SignupPage({ theme, navigate }) {
             className="w-16 h-16 rounded-full mx-auto flex items-center justify-center"
             style={{ backgroundColor: theme.greenSoft, color: theme.green }}
           >
-            <Mail className="w-8 h-8" />
+            <CheckCircle2 className="w-8 h-8" />
           </div>
 
           <h3 className="text-2xl font-bold tracking-tight" style={{ color: theme.text }}>
-            Check your email to activate your account
+            Your account is ready
           </h3>
 
           <p className="text-sm sm:text-base leading-relaxed max-w-sm mx-auto" style={{ color: theme.textMuted }}>
-            Please check your inbox and click the activation link to finish setting up your account before logging in.
+            You can now log in with the email address and password you just registered.
           </p>
 
           <button

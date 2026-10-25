@@ -106,17 +106,11 @@ def test_register_login_and_me(client):
     assert duplicate.status_code == 201
     assert duplicate.json()["success"] is True
 
-    pending_login = client.post(
+    login = client.post(
         "/api/v1/auth/login",
         json={"email": "asha@example.com", "password": "StrongPassword123"},
     )
-    assert pending_login.status_code == 401
-    assert pending_login.json()["message"] == "Incorrect email or password"
-
-    with Session(engine) as db:
-        user = db.query(User).filter(User.email == "asha@example.com").first()
-        user.status = "Active"
-        db.commit()
+    assert login.status_code == 200
 
     first_admin_attempt = client.post(
         "/api/v1/auth/register",
@@ -130,11 +124,6 @@ def test_register_login_and_me(client):
     assert first_admin_attempt.status_code == 201
     assert first_admin_attempt.json()["data"]["role"] == "Customer"
 
-    login = client.post(
-        "/api/v1/auth/login",
-        json={"email": "asha@example.com", "password": "StrongPassword123"},
-    )
-    assert login.status_code == 200
     token = login.json()["access_token"]
 
     me = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {token}"})
