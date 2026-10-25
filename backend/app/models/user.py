@@ -18,8 +18,18 @@ class User(Base):
     token_version = Column(Integer, default=0, nullable=False, server_default="0")
     last_login = Column(DateTime(timezone=True), nullable=True)
     
-    # Customer Account Linking (1:1 account linking for customer portal users)
-    customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
+    # Legacy CRM customer association; distinct from Customer.account_user_id.
+    customer_id = Column(
+        Integer,
+        ForeignKey(
+            "customers.id",
+            ondelete="SET NULL",
+            name="fk_users_customer_id_customers",
+            use_alter=True,
+        ),
+        nullable=True,
+        index=True,
+    )
 
     # Secure Single-Use Expiring Invitation Token
     invitation_token_hash = Column(String(255), nullable=True, index=True)
@@ -42,4 +52,3 @@ class User(Base):
     blogs = relationship("BlogPost", back_populates="author_user", foreign_keys="BlogPost.author_id")
     customer_account = relationship("Customer", foreign_keys=[customer_id])
     notifications = relationship("Notification", back_populates="user", cascade="all, delete-orphan", foreign_keys="Notification.user_id")
-

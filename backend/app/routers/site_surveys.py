@@ -47,7 +47,7 @@ SURVEY_MANAGER_ROLES = {"admin", "manager"}
 
 
 def is_survey_manager(user: User) -> bool:
-    return user.role.lower() in SURVEY_MANAGER_ROLES
+    return user.role.strip().casefold() in SURVEY_MANAGER_ROLES
 
 
 def accessible_surveys_query(db: Session, current_user: User):
@@ -56,12 +56,15 @@ def accessible_surveys_query(db: Session, current_user: User):
         return query
     if is_staff_user(current_user):
         return query.filter(SiteSurvey.assigned_user_id == current_user.id)
-    if current_user.role.lower() == "customer":
+    if current_user.role.strip().casefold() == "customer":
         return (
             query.join(Customer, SiteSurvey.customer_id == Customer.id)
             .outerjoin(Project, SiteSurvey.project_id == Project.id)
             .filter(
-                Customer.account_user_id == current_user.id,
+                or_(
+                    Customer.account_user_id == current_user.id,
+                    Customer.id == current_user.customer_id,
+                ),
                 or_(
                     SiteSurvey.project_id.is_(None),
                     Project.customer_id == SiteSurvey.customer_id,
@@ -157,16 +160,17 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
 
 
 def check_survey_access(survey: SiteSurvey, current_user: User) -> None:
-    if current_user.role in ["Admin", "Manager"]:
+    role = current_user.role.strip().casefold()
+    if role in {"admin", "manager"}:
         return
-    if current_user.role.lower() == "customer":
-        if not survey.customer or survey.customer.account_user_id != current_user.id:
+    if current_user.role == "Customer":
+        if not current_user.customer_id or survey.customer_id != current_user.customer_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Access denied: You are not authorized to view this site survey."
             )
         return
-    if current_user.role in ["Sales Rep", "Support"]:
+    if role in {"sales rep", "support"}:
         if survey.assigned_user_id != current_user.id and survey.assigned_to != current_user.name:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -209,10 +213,15 @@ def list_surveys(
 ):
     query = accessible_surveys_query(db, current_user)
 
+    # Scoping
     if current_user.role in ["Sales Rep", "Support"]:
         query = query.filter(or_(SiteSurvey.assigned_user_id == current_user.id, SiteSurvey.assigned_to == current_user.name))
-    elif current_user.role.lower() == "customer":
-        pass
+    elif current_user.role == "Customer":
+        if current_user.customer_id:
+            query = query.filter(SiteSurvey.customer_id == current_user.customer_id)
+        else:
+            query = query.filter(SiteSurvey.customer_name == current_user.name)
+
 
     if search:
         s = f"%{search.strip()}%"
@@ -380,8 +389,8 @@ def create_survey(
         property_type=request.property_type,
         survey_date=request.survey_date.strip(),
         time_slot=request.time_slot.strip(),
-        assigned_to=assigned_to,
-        status=survey_status,
+        assigned_to=request.assigned_to.strip(),
+        status=request.status if request.status else "Scheduled",
         customer_id=customer_id,
         project_id=project_id,
         lead_id=lead_id,

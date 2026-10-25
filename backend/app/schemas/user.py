@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 
-from app.schemas.validators import AppEmailStr
+from app.schemas.validators import AppEmailStr, StrongPasswordStr
 
 ALLOWED_ROLES = ["Admin", "Manager", "Sales Rep", "Support", "Customer"]
 ALLOWED_STATUSES = ["Active", "Invited", "Inactive"]
@@ -38,7 +38,7 @@ class UserCreate(BaseModel):
     phone: Optional[str] = None
     role: str = Field(default="Sales Rep")
     status: Optional[str] = Field(default="Invited")
-    password: Optional[str] = Field(default=None, min_length=6)
+    password: Optional[StrongPasswordStr] = None
     customer_id: Optional[int] = None
 
     @field_validator("role")
@@ -73,7 +73,7 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     status: Optional[str] = None
     customer_id: Optional[int] = None
-    password: Optional[str] = Field(None, min_length=8)
+    password: Optional[StrongPasswordStr] = None
 
     @field_validator("role")
     @classmethod
@@ -129,4 +129,3 @@ class UserStatsResponse(BaseModel):
         self.inactiveUsers = self.inactive_users
         self.invitedUsers = self.invited_users
         self.usersByRole = self.users_by_role
-

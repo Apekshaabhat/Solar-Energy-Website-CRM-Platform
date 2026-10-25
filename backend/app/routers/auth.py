@@ -36,7 +36,7 @@ router = APIRouter(
     status_code=status.HTTP_201_CREATED,
     summary="Register a new user account",
     description=(
-        "Registers a new customer account in Pending status. "
+        "Registers a new active customer account. "
         "Does not reveal whether the email already exists."
     ),
 )
@@ -50,10 +50,7 @@ def register(
 
     return APIResponse(
         success=True,
-        message=(
-            "Registration request submitted. Your account "
-            "is pending administrator approval."
-        ),
+        message="Registration successful. You can now log in.",
         data=UserResponse.model_validate(user) if user else None,
     )
 

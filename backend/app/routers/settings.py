@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-from fastapi import APIRouter, Depends
-=======
 import json
 from fastapi import APIRouter, Depends, HTTPException, status
->>>>>>> 1d42b23b15dd322cb75cb755085a881817f909a4
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -95,14 +91,6 @@ def update_settings(
         if val is not None:
             setattr(settings_obj, field, val)
 
-<<<<<<< HEAD
-    try:
-        db.commit()
-        db.refresh(settings_obj)
-    except SQLAlchemyError:
-        db.rollback()
-        raise
-=======
     new_state = {
         "company_name": settings_obj.company_name,
         "support_email": settings_obj.support_email,
@@ -126,10 +114,13 @@ def update_settings(
     )
     db.add(activity)
 
-    db.commit()
-    db.refresh(settings_obj)
+    try:
+        db.commit()
+        db.refresh(settings_obj)
+    except SQLAlchemyError:
+        db.rollback()
+        raise
 
->>>>>>> 1d42b23b15dd322cb75cb755085a881817f909a4
     return APIResponse(
         success=True,
         message="Settings updated successfully",

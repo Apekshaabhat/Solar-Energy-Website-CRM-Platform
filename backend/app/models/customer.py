@@ -19,7 +19,15 @@ class Customer(Base):
     status = Column(String(50), default="Active", nullable=False)  # Active, Inactive
     customer_since = Column(String(50), nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    account_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    account_user_id = Column(
+        Integer,
+        ForeignKey(
+            "users.id",
+            ondelete="SET NULL",
+            name="fk_customers_account_user_id_users",
+        ),
+        nullable=True,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

@@ -111,7 +111,8 @@ copy .env.example .env
 Ensure `backend/.env` contains your PostgreSQL credentials:
 ```env
 DATABASE_URL=postgresql+psycopg2://postgres:your_password@localhost:5432/solar_crm
-SECRET_KEY=your-super-secret-key-change-this-in-production-min-32-chars
+SECRET_KEY=REPLACE_WITH_A_UNIQUE_RANDOM_SECRET_OF_AT_LEAST_32_CHARACTERS
+SEED_ADMIN_PASSWORD=REPLACE_WITH_A_UNIQUE_STRONG_PASSWORD_OF_AT_LEAST_12_CHARACTERS
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000
 ```
 
@@ -153,14 +154,12 @@ The frontend will be available at `http://localhost:5173`.
 
 ---
 
-## Default Admin Credentials
+## Initial Admin Account
 
-The initial seed creates an administrative account:
-- **Email**: `admin@solara.com`
-- **Password**: `admin123`
+The explicit seed command creates `admin@solara.com` using the password set in `SEED_ADMIN_PASSWORD`. It does not reset an existing administrator's password. Application startup does not automatically create users or demo data.
 
 > [!WARNING]
-> Change the default credentials and set a secure `SECRET_KEY` in `backend/.env` prior to deploying to staging or production.
+> Use unique secrets in `backend/.env`. Production requires `ENVIRONMENT=production`, `DEBUG=False`, a unique signing key of at least 32 characters, and a strong administrator seed password.
 
 ---
 

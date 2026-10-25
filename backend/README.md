@@ -27,7 +27,26 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Configure `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, and token settings in `.env`. Generate a unique `SECRET_KEY` of at least 32 characters; do not use the example placeholder. PostgreSQL is the default database for local development and production.
+Configure `DATABASE_URL`, `SECRET_KEY`, `CORS_ORIGINS`, and token settings in `.env`. Generate a unique `SECRET_KEY` of at least 32 characters; do not use the example placeholder. Production requires `ENVIRONMENT=production`, `DEBUG=False`, a unique signing key, and a strong `SEED_ADMIN_PASSWORD`.
+
+### Email configuration
+
+Customer signup does not require email verification. Administrator invitations use single-use activation links. For local development, the default `EMAIL_BACKEND=console` prints invitation links in the backend terminal; it does not send email.
+
+To send through Gmail, enable 2-Step Verification on the sending Google account, create a Google App Password, and set these values in `backend/.env`:
+
+```env
+EMAIL_BACKEND=smtp
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_TLS=True
+SMTP_USER=your.name@gmail.com
+SMTP_PASSWORD=your-16-character-google-app-password
+EMAILS_FROM_EMAIL=your.name@gmail.com
+FRONTEND_URL=http://localhost:5173
+```
+
+Use the App Password, not the account's regular password. Keep it private and do not commit `.env`. Restart the backend after changing settings. If invitation email delivery fails, correct the SMTP configuration and retry the invitation. The previous activation link is invalidated when a fresh one is issued.
 
 ---
 
@@ -39,21 +58,19 @@ Apply all Alembic migrations (including `003_crm_relationships_and_activity`):
 alembic upgrade head
 ```
 
-Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters in `.env`, then seed the local database with the admin account and sample CRM records:
-Seed the database with the admin account and interconnected sample CRM records:
+Set a unique `SEED_ADMIN_PASSWORD` of at least 12 characters, including uppercase, lowercase, and numeric characters, in `.env`. Run the seed command explicitly to create the initial administrator and sample CRM records:
 
 ```powershell
 python seed.py
 ```
 
-The seed admin login is `admin@solara.com` and uses the password configured in `SEED_ADMIN_PASSWORD`. The seed script generates unknown random passwords for other sample users.
-- Seed admin account: `admin@solara.com` / `admin123`
+The seed admin login is `admin@solara.com` and uses the password configured in `SEED_ADMIN_PASSWORD`. Rerunning the seed command does not reset an existing administrator password. The seed script generates unknown random passwords for other sample users. Application startup does not automatically seed users or demo data.
 - Database tables populated: `users`, `customers`, `leads`, `site_surveys`, `projects`, `activities`, `notifications`, `blogs`, `faqs`, `system_settings`.
 
 ---
 ## Customer account profiles
 
-Migration `003_customer_account_relationship` adds a nullable, unique `customers.account_user_id` foreign key for the customer login account. It is separate from `assigned_user_id`, which continues to identify the staff member responsible for the CRM record. The migration does not infer or backfill ownership from matching email addresses; an administrator or manager must explicitly link an existing customer account through the customer create/update API using `account_user_id`.
+Migration `003_customer_account_relationship` adds a nullable, unique `customers.account_user_id` foreign key for the customer login account. It is separate from `assigned_user_id`, which identifies the staff member responsible for the CRM record. `users.customer_id` is retained as a legacy CRM association used by existing customer-facing scopes and token claims; it is not a replacement for either customer-side relationship. The migration does not infer or backfill ownership from email addresses. An administrator or manager must explicitly link a customer portal account through the customer create/update API using `account_user_id`. Signup and the administrator reconciliation operation do not associate accounts with existing customer records based on matching email or phone.
 
 Once linked, the authenticated customer can read or update their own profile through `GET` and `PATCH /api/v1/customers/me`. Customer profile routes resolve the record from the authenticated account; they do not accept a customer ID.
 

@@ -33,13 +33,8 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
 
     try {
       const loggedUser = await login(email, password, rememberMe);
-      
-      if (loggedUser?.status && loggedUser.status.toLowerCase() !== "active") {
-        throw new Error(`Your account is currently ${loggedUser.status}. Please check your activation link.`);
-      }
-
       const targetRoute = getDefaultRouteForRole(loggedUser?.role);
-      navigate(targetRoute, { replace: true });
+      navigate(targetRoute);
     } catch (err) {
       if (err.status === 401 || err.status === 422 || err.message?.includes('inactive')) {
         setError(err.message || 'Invalid email or password');

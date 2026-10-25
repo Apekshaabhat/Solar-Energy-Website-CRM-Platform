@@ -8,7 +8,7 @@ import bcrypt
 from app.core.config import settings
 
 # Precomputed dummy hash for timing attack mitigation during invalid login
-_DUMMY_BCRYPT_HASH = "$2b$12$K1d0w3h4k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2g"
+_DUMMY_BCRYPT_HASH = "$2b$12$of1XAWMoZxF1V5.9feSUCu5bb3ppfCEJpz/LXRrNzNUdjsBfTHCnC"
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

@@ -25,7 +25,8 @@ def get_current_user(
 ) -> User:
     """
     Retrieve and validate the current authenticated user from DB on every request.
-    Rejects revoked tokens, inactive users (401), and outdated token versions.
+    Rejects revoked tokens, deactivated or pending accounts, and outdated token
+    versions. Deactivated accounts receive 403; pending accounts receive 401.
     Never trusts role/status stored in the JWT claims.
     """
     if not token:
@@ -56,7 +57,15 @@ def get_current_user(
         raise _credentials_exception()
 
     user = db.query(User).filter(User.id == user_id).first()
-    if user is None or user.status != "Active":
+    if user is None:
+        raise _credentials_exception()
+    normalized_status = user.status.strip().casefold()
+    if normalized_status == "inactive":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive.",
+        )
+    if normalized_status != "active":
         raise _credentials_exception()
 
     # Reject token if token_version doesn't match current user token_version
@@ -89,8 +98,8 @@ def require_roles(allowed_roles: List[str]):
     """Role-based authorization dependency factory."""
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
         # Normalize comparison (case-insensitive)
-        normalized_allowed = [r.lower() for r in allowed_roles]
-        if current_user.role.lower() not in normalized_allowed:
+        normalized_allowed = {role.strip().casefold() for role in allowed_roles}
+        if current_user.role.strip().casefold() not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Operation not permitted. Required roles: {', '.join(allowed_roles)}"
@@ -100,7 +109,7 @@ def require_roles(allowed_roles: List[str]):
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role != "Admin":
+    if current_user.role.strip().casefold() != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation requires Administrator privileges."
@@ -118,4 +127,4 @@ def require_staff(current_user: User = Depends(get_current_user)) -> User:
 
 
 def is_staff_user(user: Optional[User]) -> bool:
-    return user is not None and user.role.lower() in STAFF_ROLE_SET
+    return user is not None and user.role.strip().casefold() in STAFF_ROLE_SET

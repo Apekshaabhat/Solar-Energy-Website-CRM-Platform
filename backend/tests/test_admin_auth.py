@@ -28,11 +28,33 @@ def test_public_signup_cannot_create_admin(client):
     assert resp.status_code == 201
     data = resp.json()["data"]
     assert data["role"] == "Customer"
-    assert data["status"] in ["Active", "Pending"]
+    assert data["status"] == "Active"
 
     # Token and secret hashes should not be exposed
     assert "password_hash" not in data
     assert "invitation_token_hash" not in data
+
+
+def test_bootstrap_admin_is_idempotent_without_password_reset():
+    with SessionLocal() as db:
+        admin = AuthService.bootstrap_admin(
+            db=db,
+            name="Initial Admin",
+            email="seed-idempotent@solara.test",
+            password="SecureInitialAdmin123",
+        )
+        original_hash = admin.password_hash
+
+        rerun = AuthService.bootstrap_admin(
+            db=db,
+            name="Changed Name",
+            email="seed-idempotent@solara.test",
+            password="DifferentAdminPassword456",
+        )
+
+        assert rerun.id == admin.id
+        assert rerun.password_hash == original_hash
+        assert rerun.name == "Initial Admin"
 
 
 def test_admin_invitation_and_activation_workflow(client):
