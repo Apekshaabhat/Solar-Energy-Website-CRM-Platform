@@ -68,7 +68,7 @@ def seed_data():
                     email="marcus.c@solara.com",
                     password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98111 22334",
-                    role="Manager",
+                    role="Sales Rep",
                     status="Active",
                 ),
                 User(
@@ -92,7 +92,7 @@ def seed_data():
                     email="priya.p@solara.com",
                     password_hash=get_password_hash(secrets.token_urlsafe(32)),
                     phone="+91 98444 55667",
-                    role="Support",
+                    role="Sales Rep",
                     status="Inactive",
                 ),
             ]

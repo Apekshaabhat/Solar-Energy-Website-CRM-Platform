@@ -17,8 +17,8 @@ from app.services.crm_service import CRMService
 from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/projects", tags=["Projects Management"])
-STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
-PROJECT_MANAGER_ROLES = {"admin", "manager"}
+STAFF_ROLES = ["Admin", "Sales Rep"]
+PROJECT_MANAGER_ROLES = {"admin"}
 NULLABLE_PROJECT_FIELDS = {
     "capacity_kw",
     "customer_id",
@@ -33,7 +33,7 @@ NULLABLE_PROJECT_FIELDS = {
 
 
 def is_project_manager(user: User) -> bool:
-    return user.role.lower() in PROJECT_MANAGER_ROLES
+    return user.role.strip().casefold() in PROJECT_MANAGER_ROLES
 
 
 def accessible_projects_query(
@@ -48,21 +48,13 @@ def accessible_projects_query(
     if is_staff_user(current_user):
         return (
             query.outerjoin(Customer, Project.customer_id == Customer.id)
+            .outerjoin(Lead, Project.source_lead_id == Lead.id)
             .filter(
                 or_(
                     Project.is_public.is_(True),
                     Project.assigned_user_id == current_user.id,
                     Customer.assigned_user_id == current_user.id,
-                )
-            )
-        )
-    if current_user.role.lower() == "customer":
-        return (
-            query.outerjoin(Customer, Project.customer_id == Customer.id)
-            .filter(
-                or_(
-                    Project.is_public.is_(True),
-                    Customer.account_user_id == current_user.id,
+                    Lead.assigned_user_id == current_user.id,
                 )
             )
         )
@@ -78,10 +70,12 @@ def manageable_projects_query(
         return query
     return (
         query.outerjoin(Customer, Project.customer_id == Customer.id)
+        .outerjoin(Lead, Project.source_lead_id == Lead.id)
         .filter(
             or_(
                 Project.assigned_user_id == current_user.id,
                 Customer.assigned_user_id == current_user.id,
+                Lead.assigned_user_id == current_user.id,
             )
         )
     )
@@ -128,12 +122,15 @@ def check_project_access(project: Project, current_user: Optional[User]) -> None
         return
     if not current_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if current_user.role in ["Admin", "Manager"]:
+    if current_user.role.strip().casefold() == "admin":
         return
-    if current_user.role.lower() == "customer" and project.customer and project.customer.account_user_id == current_user.id:
-        return
-    if current_user.role in ["Sales Rep", "Support"] and project.assigned_user_id == current_user.id:
-        return
+    if current_user.role.strip().casefold() in ("sales rep", "sales_rep"):
+        if (
+            project.assigned_user_id == current_user.id
+            or (project.customer and project.customer.assigned_user_id == current_user.id)
+            or (project.source_lead and project.source_lead.assigned_user_id == current_user.id)
+        ):
+            return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied to this project.")
 
 
@@ -204,7 +201,7 @@ def list_projects(
 )
 def create_project(
     request: ProjectCreate,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     if is_project_manager(current_user):
@@ -292,7 +289,7 @@ def create_project(
 )
 def start_project(
     project_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = CRMService.project_start_workflow(db, project_id, current_user.id)
@@ -310,7 +307,7 @@ def start_project(
 )
 def hold_project(
     project_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = CRMService.project_hold_workflow(db, project_id, current_user.id)
@@ -328,7 +325,7 @@ def hold_project(
 )
 def resume_project(
     project_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = CRMService.project_resume_workflow(db, project_id, current_user.id)
@@ -347,7 +344,7 @@ def resume_project(
 def complete_project(
     project_id: int,
     actual_cost: Optional[float] = Query(None),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = CRMService.project_complete_workflow(db, project_id, actual_cost, current_user.id)
@@ -365,7 +362,7 @@ def complete_project(
 )
 def cancel_project(
     project_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = CRMService.project_cancel_workflow(db, project_id, current_user.id)
@@ -400,7 +397,7 @@ def get_project(
 def update_project(
     project_id: int,
     request: ProjectUpdate,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     project = (
@@ -530,7 +527,7 @@ def get_project_related_data(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
-    project = manageable_projects_query(db, current_user).filter(Project.id == project_id).first()
+    project = accessible_projects_query(db, current_user).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
 
@@ -575,7 +572,7 @@ def get_project_related_data(
 )
 def delete_project(
     project_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     CRMService.project_cancel_workflow(db, project_id, current_user.id)

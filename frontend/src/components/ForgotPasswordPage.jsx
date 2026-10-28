@@ -1,19 +1,22 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Send, Mail } from 'lucide-react';
 import AuthShell from './AuthShell';
 import { FormField } from './FormField';
 import authApi from '../api/auth';
 
-export default function ForgotPasswordPage({ theme, navigate }) {
+export default function ForgotPasswordPage({ theme, navigate: propNavigate }) {
+  const routerNavigate = useNavigate();
   const [email, setEmail] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
 
   const goToLogin = () => {
-    if (typeof navigate === 'function') {
-      navigate('Login');
+    if (typeof propNavigate === 'function') {
+      propNavigate('Login');
     }
+    routerNavigate('/login');
   };
 
   const handleSubmit = async (e) => {

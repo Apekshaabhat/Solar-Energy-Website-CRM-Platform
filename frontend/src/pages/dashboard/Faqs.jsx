@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Search, HelpCircle, CheckCircle2 } from "lucide-r
 import { faqsApi } from "../../api/faqs";
 import Modal from "../../components/dashboard/Modal";
 import { FormField, TextInput } from "../../components/dashboard/FormField";
+import { useAuth } from "../../context/AuthContext";
 
 const CATEGORIES = ["General", "Installation", "Financial", "Maintenance", "Technical"];
 
@@ -14,6 +15,8 @@ const emptyForm = {
 };
 
 export default function Faqs() {
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase()?.trim() === "admin";
   const [faqs, setFaqs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -120,14 +123,16 @@ export default function Faqs() {
             Manage frequently asked questions and support content for solar customers.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleOpenCreate}
-          className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#1F5C3E] hover:bg-[#184a32] text-white text-sm font-medium shadow-sm transition-colors cursor-pointer shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Add New FAQ</span>
-        </button>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={handleOpenCreate}
+            className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-full bg-[#1F5C3E] hover:bg-[#184a32] text-white text-sm font-medium shadow-sm transition-colors cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Add New FAQ</span>
+          </button>
+        )}
       </div>
 
       {error && (
@@ -190,24 +195,26 @@ export default function Faqs() {
                   {faq.answer}
                 </p>
               </div>
-              <div className="flex items-center gap-1 shrink-0">
-                <button
-                  type="button"
-                  onClick={() => handleOpenEdit(faq)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-[#0E1712] transition-colors"
-                  title="Edit FAQ"
-                >
-                  <Pencil className="w-4 h-4" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleDelete(faq.id)}
-                  className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
-                  title="Delete FAQ"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
+              {isAdmin && (
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenEdit(faq)}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-[#0E1712] transition-colors"
+                    title="Edit FAQ"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDelete(faq.id)}
+                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors"
+                    title="Delete FAQ"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           ))
         ) : (

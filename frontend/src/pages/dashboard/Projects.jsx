@@ -7,6 +7,7 @@ import StatusBadge from "../../components/dashboard/StatusBadge";
 import { FormField, SelectInput, TextInput } from "../../components/dashboard/FormField";
 import { projectsApi } from "../../api/projects";
 import { useDashboardData } from "../../context/DashboardDataContext";
+import { useAuth } from "../../context/AuthContext";
 
 const emptyForm = {
   name: "",
@@ -36,6 +37,8 @@ function toForm(project) {
 
 export default function Projects() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase()?.trim() === "admin";
   const { refreshToken, notifyCrmChange } = useDashboardData();
   const [projects, setProjects] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -264,105 +267,109 @@ export default function Projects() {
                     <StatusBadge status={project.status} />
                   </td>
                   <td className="px-2 py-3 text-right">
-                    <div className="flex items-center justify-end gap-1.5">
-                      {/* Status = Planning: Start Project | Cancel Project */}
-                      {project.status === "Planning" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleStartProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs bg-leaf-600 hover:bg-leaf-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Start project (transitions Planning -> In Progress)"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            Start Project
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleCancelProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Cancel project"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Cancel
-                          </button>
-                        </>
-                      )}
+                    {isAdmin ? (
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Status = Planning: Start Project | Cancel Project */}
+                        {project.status === "Planning" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleStartProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs bg-leaf-600 hover:bg-leaf-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Start project (transitions Planning -> In Progress)"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              Start Project
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCancelProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Cancel project"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              Cancel
+                            </button>
+                          </>
+                        )}
 
-                      {/* Status = In Progress: Complete | Put On Hold | Cancel */}
-                      {project.status === "In Progress" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleCompleteProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs bg-[#1F5C3E] hover:bg-[#184A32] text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Mark project as Completed"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            Complete
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleHoldProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Put project on hold"
-                          >
-                            <Pause className="w-3.5 h-3.5" />
-                            Hold
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleCancelProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Cancel project"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Cancel
-                          </button>
-                        </>
-                      )}
+                        {/* Status = In Progress: Complete | Put On Hold | Cancel */}
+                        {project.status === "In Progress" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleCompleteProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs bg-[#1F5C3E] hover:bg-[#184A32] text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Mark project as Completed"
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              Complete
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleHoldProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 hover:bg-amber-100 border border-amber-200 dark:border-amber-800 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Put project on hold"
+                            >
+                              <Pause className="w-3.5 h-3.5" />
+                              Hold
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCancelProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Cancel project"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              Cancel
+                            </button>
+                          </>
+                        )}
 
-                      {/* Status = On Hold: Resume | Cancel */}
-                      {project.status === "On Hold" && (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => handleResumeProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Resume project to In Progress"
-                          >
-                            <RotateCcw className="w-3.5 h-3.5" />
-                            Resume
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleCancelProject(project)}
-                            disabled={saving}
-                            className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                            title="Cancel project"
-                          >
-                            <XCircle className="w-3.5 h-3.5" />
-                            Cancel
-                          </button>
-                        </>
-                      )}
+                        {/* Status = On Hold: Resume | Cancel */}
+                        {project.status === "On Hold" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleResumeProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Resume project to In Progress"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              Resume
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleCancelProject(project)}
+                              disabled={saving}
+                              className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                              title="Cancel project"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                              Cancel
+                            </button>
+                          </>
+                        )}
 
-                      {/* Edit Technical Parameters */}
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(project)}
-                        className="text-ink-400 hover:text-ink-700 dark:hover:text-[#F3F6F1] p-1.5 rounded-lg hover:bg-line/40 transition-colors"
-                        title="Edit project details"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+                        {/* Edit Technical Parameters */}
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(project)}
+                          className="text-ink-400 hover:text-ink-700 dark:hover:text-[#F3F6F1] p-1.5 rounded-lg hover:bg-line/40 transition-colors"
+                          title="Edit project details"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs text-ink-400 font-medium">Read-only</span>
+                    )}
                   </td>
                 </tr>
               ))}

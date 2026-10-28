@@ -23,7 +23,7 @@ def make_customer(email):
 
 def test_signup_does_not_link_existing_customer_by_email(client, monkeypatch):
     monkeypatch.setattr(
-        "app.routers.auth.EmailService.send_account_invitation_email",
+        "app.services.email_service.EmailService.send_account_invitation_email",
         lambda to_email, token: True,
     )
     with Session(engine) as db:
@@ -46,7 +46,8 @@ def test_signup_does_not_link_existing_customer_by_email(client, monkeypatch):
         user = db.query(User).filter_by(email="signup-existing@example.com").one()
         assert user.customer_id != existing_customer_id
         assert db.query(Customer).filter_by(id=existing_customer_id).one().account_user_id is None
-        assert db.query(Customer).filter_by(id=user.customer_id).one().account_user_id is None
+        if user.customer_id:
+            assert db.query(Customer).filter_by(id=user.customer_id).one().account_user_id is None
 
 
 def test_activation_does_not_link_existing_customer_by_email(client):

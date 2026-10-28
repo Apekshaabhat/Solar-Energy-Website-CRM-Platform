@@ -51,8 +51,8 @@ class AuthService:
     def register_user(db: Session, request: RegisterRequest) -> Optional[User]:
         """
         Public registration endpoint.
-        IMPORTANT: Public signup MUST NEVER grant Admin or Staff privileges.
-        All public registrations are strictly assigned role='Customer'.
+        Creates an internal Sales Representative account defaulting strictly to 'Sales Rep'.
+        Any browser-supplied role parameter is strictly ignored.
         """
         email_clean = request.email.lower().strip()
         existing = (
@@ -64,30 +64,16 @@ class AuthService:
         if existing:
             return None
 
-        new_customer = Customer(
-            name=request.name.strip(),
-            contact=request.phone.strip() if request.phone else email_clean,
-            email=email_clean,
-            phone=request.phone.strip() if request.phone else None,
-            location="Not specified",
-            property_type="Residential",
-            status="Active",
-            customer_since=datetime.now(timezone.utc).strftime("%d %b %Y"),
-        )
-        db.add(new_customer)
-        db.flush()
-
         user = User(
             name=request.name.strip(),
             email=email_clean,
             password_hash=get_password_hash(request.password),
             phone=request.phone.strip() if request.phone else None,
-            role="Customer",
+            role="Sales Rep",
             status="Active",
             token_version=0,
             failed_attempts=0,
             locked_until=None,
-            customer_id=new_customer.id,
         )
         db.add(user)
         db.flush()
@@ -97,10 +83,9 @@ class AuthService:
             entity_type="user",
             entity_id=user.id,
             action="registered",
-            title=f"Customer registered: {user.name}",
-            description=f"Public registration completed for {user.email}",
-            customer_id=new_customer.id,
-            customer_name=user.name,
+            title=f"Sales Rep registered: {user.name}",
+            description=f"Public registration completed for {user.email} as Sales Rep",
+            user_id=user.id,
             status_val=user.status,
         )
 
@@ -147,21 +132,6 @@ class AuthService:
             role=role,
             status="Active",
         )
-        if role == "Customer":
-            cust = Customer(
-                name=name.strip(),
-                contact=phone.strip() if phone else email_clean,
-                email=email_clean,
-                phone=phone.strip() if phone else None,
-                location="Residential Address",
-                property_type="Residential",
-                status="Active",
-                customer_since="01 Jan 2026",
-            )
-            db.add(cust)
-            db.flush()
-            admin_user.customer_id = cust.id
-
         db.add(admin_user)
         db.commit()
         db.refresh(admin_user)
@@ -247,23 +217,6 @@ class AuthService:
         user.token_version = (user.token_version or 0) + 1
         user.invitation_token_hash = None
         user.invitation_expires_at = None
-
-        # Legacy customer association: create a separate record rather than inferring
-        # ownership from a matching email address.
-        if user.role == "Customer" and not user.customer_id:
-            new_customer = Customer(
-                name=user.name,
-                contact=user.phone or user.email,
-                email=user.email,
-                phone=user.phone,
-                location="Not specified",
-                property_type="Residential",
-                status="Active",
-                customer_since=now.strftime("%d %b %Y"),
-            )
-            db.add(new_customer)
-            db.flush()
-            user.customer_id = new_customer.id
 
         CRMService.record_activity(
             db=db,

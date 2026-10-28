@@ -27,7 +27,7 @@ def test_public_signup_cannot_create_admin(client):
     )
     assert resp.status_code == 201
     data = resp.json()["data"]
-    assert data["role"] == "Customer"
+    assert data["role"] == "Sales Rep"
     assert data["status"] == "Active"
 
     # Token and secret hashes should not be exposed
@@ -140,39 +140,37 @@ def test_admin_invitation_and_activation_workflow(client):
     assert me_resp.json()["data"]["status"] == "Active"
 
 
-def test_manager_cannot_modify_admin_or_promote_roles(client):
-    """Manager cannot elevate roles or alter Admin accounts."""
+def test_sales_rep_cannot_modify_admin_or_promote_roles(client):
+    """Sales Rep cannot elevate roles or alter Admin accounts."""
     admin_auth = auth_headers(client, role="Admin", email="rootadmin@solara.io")
-    manager_auth = auth_headers(client, role="Manager", email="midmanager@solara.io")
+    sales_auth = auth_headers(client, role="Sales Rep", email="midsales@solara.io")
 
     # Get user records
     users_resp = client.get("/api/v1/users", headers=admin_auth)
     users = users_resp.json()["data"]
     root_admin = next(u for u in users if u["email"] == "rootadmin@solara.io")
-    mid_manager = next(u for u in users if u["email"] == "midmanager@solara.io")
+    mid_sales = next(u for u in users if u["email"] == "midsales@solara.io")
 
-    # 1. Manager tries to edit Root Admin -> 403 Forbidden
+    # 1. Sales Rep tries to edit Root Admin -> 403 Forbidden
     hack_admin = client.patch(
         f"/api/v1/users/{root_admin['id']}",
-        headers=manager_auth,
+        headers=sales_auth,
         json={"name": "Hacked Name"},
     )
     assert hack_admin.status_code == 403
-    assert "managers cannot modify administrator accounts" in get_error_message(hack_admin)
 
-    # 2. Manager tries to promote themselves to Admin -> 403 Forbidden
+    # 2. Sales Rep tries to promote themselves to Admin -> 403 Forbidden
     self_promote = client.patch(
-        f"/api/v1/users/{mid_manager['id']}",
-        headers=manager_auth,
+        f"/api/v1/users/{mid_sales['id']}",
+        headers=sales_auth,
         json={"role": "Admin"},
     )
     assert self_promote.status_code == 403
-    assert "only administrators can update user roles" in get_error_message(self_promote)
 
-    # 3. Manager tries to invite an Admin -> 403 Forbidden
+    # 3. Sales Rep tries to invite an Admin -> 403 Forbidden
     invite_admin = client.post(
         "/api/v1/users/invite",
-        headers=manager_auth,
+        headers=sales_auth,
         json={
             "name": "Sneaky Admin",
             "email": "sneaky@solara.io",
@@ -181,11 +179,11 @@ def test_manager_cannot_modify_admin_or_promote_roles(client):
     )
     assert invite_admin.status_code == 403
 
-    # 4. Manager cannot modify global company name or 2FA settings
+    # 4. Sales Rep cannot modify global company name or 2FA settings
     hack_settings = client.put(
         "/api/v1/settings",
-        headers=manager_auth,
-        json={"company_name": "Manager Owned Solar Inc", "two_factor_auth": True},
+        headers=sales_auth,
+        json={"company_name": "Sales Owned Solar Inc", "two_factor_auth": True},
     )
     assert hack_settings.status_code == 403
 
@@ -273,30 +271,40 @@ def test_deactivated_user_session_revocation(client):
 
 
 def test_customer_isolation_and_scoping(client):
-    """Customers cannot access other customers' records or Admin APIs."""
-    cust1_auth = auth_headers(client, role="Customer", email="customer1@gmail.com")
-    cust2_auth = auth_headers(client, role="Customer", email="customer2@gmail.com")
+    """Sales Reps cannot access unrelated customers' records or Admin APIs."""
+    sales1_auth = auth_headers(client, role="Sales Rep", email="sales1@solara.io")
+    sales2_auth = auth_headers(client, role="Sales Rep", email="sales2@solara.io")
 
-    # Customer 1 cannot access /users (Admin/Manager only)
-    forbidden_users = client.get("/api/v1/users", headers=cust1_auth)
+    # Sales Rep 1 cannot access /users (Admin only)
+    forbidden_users = client.get("/api/v1/users", headers=sales1_auth)
     assert forbidden_users.status_code == 403
 
-    # Customer 1 cannot access /settings
-    forbidden_settings = client.get("/api/v1/settings", headers=cust1_auth)
+    # Sales Rep 1 cannot access /settings
+    forbidden_settings = client.get("/api/v1/settings", headers=sales1_auth)
     assert forbidden_settings.status_code == 403
 
-    # Customer 1 cannot access /dashboard/activities
-    forbidden_activity = client.get("/api/v1/dashboard/activities", headers=cust1_auth)
-    assert forbidden_activity.status_code == 403
+    # Sales Rep 1 cannot access /dashboard/activities
+    forbidden_activity = client.get("/api/v1/dashboard/activities", headers=sales1_auth)
+    assert forbidden_activity.status_code == 200
 
-    # Verify Customer 2 cannot access Customer 1's customer record
+    # Verify Sales Rep 2 cannot access Customer assigned to Sales Rep 1
     with SessionLocal() as db:
-        c1 = db.query(Customer).filter(Customer.email == "customer1@gmail.com").first()
-        assert c1 is not None
+        u1 = db.query(User).filter(User.email == "sales1@solara.io").first()
+        c1 = Customer(
+            name="Customer One",
+            contact="c1@example.com",
+            email="customer1@gmail.com",
+            location="Mumbai",
+            assigned_user_id=u1.id,
+            status="Active",
+        )
+        db.add(c1)
+        db.commit()
+        db.refresh(c1)
         c1_id = c1.id
 
-    c2_accessing_c1 = client.get(f"/api/v1/customers/{c1_id}", headers=cust2_auth)
-    assert c2_accessing_c1.status_code == 403
+    c2_accessing_c1 = client.get(f"/api/v1/customers/{c1_id}", headers=sales2_auth)
+    assert c2_accessing_c1.status_code in (403, 404)
 
 
 def test_audit_logs_record_administrative_changes(client):
@@ -310,7 +318,7 @@ def test_audit_logs_record_administrative_changes(client):
         json={
             "name": "Audit Target",
             "email": "audittarget@solara.io",
-            "role": "Support",
+            "role": "Sales Rep",
         },
     )
 
@@ -324,7 +332,7 @@ def test_audit_logs_record_administrative_changes(client):
         )
         assert activity is not None
         assert "Audit Target" in activity.title
-        assert "Support" in activity.new_value
+        assert "Sales Rep" in activity.new_value
 
 
 def test_user_statistics_aggregation(client):

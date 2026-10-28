@@ -28,6 +28,7 @@ class RegisterRequest(BaseModel):
     email: AppEmailStr
     password: StrongPasswordStr
     phone: Optional[str] = None
+    role: Optional[str] = None
 
     model_config = ConfigDict(extra="ignore")
 

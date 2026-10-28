@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
 import AuthShell from './AuthShell';
 import { FormField } from './FormField';
 import authApi from '../api/auth';
 
-export default function SignupPage({ theme, navigate }) {
+export default function SignupPage({ theme, navigate: propNavigate }) {
+  const routerNavigate = useNavigate();
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -23,9 +25,10 @@ export default function SignupPage({ theme, navigate }) {
   const isPasswordValid = passwordCriteria.every((c) => c.met);
 
   const goToLogin = () => {
-    if (typeof navigate === 'function') {
-      navigate('Login');
+    if (typeof propNavigate === 'function') {
+      propNavigate('Login');
     }
+    routerNavigate('/login');
   };
 
   const handleSubmit = async (e) => {
@@ -79,12 +82,12 @@ export default function SignupPage({ theme, navigate }) {
 
   return (
     <AuthShell
-      eyebrow="Get started"
-      title={submitted ? "Account created" : "Create your account"}
+      eyebrow="Sales Representative Registration"
+      title={submitted ? "Registration Submitted" : "Join SOLARA Sales Team"}
       subtitle={
         submitted
-          ? "Your SOLARA account is ready to use."
-          : "Set up your free SOLARA account to estimate savings, request quotes, and manage clean energy installations."
+          ? "Your Sales Representative account has been created successfully."
+          : "Create your Sales Representative account to access your CRM leads and authorized pipeline."
       }
       footer={footer}
       theme={theme}

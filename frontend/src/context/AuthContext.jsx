@@ -116,16 +116,8 @@ export function useAuth() {
   return context;
 }
 
-// Gap 11: Consistent Role-Based Dashboard Routing
+// Consistent Role-Based Dashboard Routing
 export function getDefaultRouteForRole(role = "") {
-  if (!role) return "/dashboard";
-  const r = role.toLowerCase().trim();
-  if (["admin", "manager", "sales rep", "support"].includes(r)) {
-    return "/dashboard";
-  }
-  if (r === "customer") {
-    return "/dashboard/customer";
-  }
   return "/dashboard";
 }
 
@@ -151,7 +143,12 @@ export function ProtectedRoute({ children, allowedRoles }) {
 
   if (allowedRoles && allowedRoles.length > 0 && user?.role) {
     const userRole = user.role.toLowerCase().trim();
-    const isAllowed = allowedRoles.some((r) => r.toLowerCase().trim() === userRole);
+    const isAllowed = allowedRoles.some((r) => {
+      const target = r.toLowerCase().trim();
+      if (target === "sales rep" && (userRole === "sales rep" || userRole === "sales_rep")) return true;
+      if (target === "admin" && userRole === "admin") return true;
+      return target === userRole;
+    });
     if (!isAllowed) {
       return (
         <div className="min-h-[60vh] flex items-center justify-center p-4">

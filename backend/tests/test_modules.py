@@ -61,11 +61,16 @@ def test_blog_management_lifecycle(client: TestClient):
     public_draft = client.get(f"/api/v1/blogs/{draft_slug}")
     assert public_draft.status_code == 404
 
-    # 5. Staff access to blogs sees drafts
-    staff_list = client.get("/api/v1/blogs", headers=sales_hdr)
-    assert staff_list.status_code == 200
-    staff_slugs = [p["slug"] for p in staff_list.json()["items"]]
-    assert draft_slug in staff_slugs
+    # 5. Admin access to blogs sees drafts, Sales Rep sees only published
+    admin_list = client.get("/api/v1/blogs", headers=admin_hdr)
+    assert admin_list.status_code == 200
+    admin_slugs = [p["slug"] for p in admin_list.json()["items"]]
+    assert draft_slug in admin_slugs
+
+    sales_list = client.get("/api/v1/blogs", headers=sales_hdr)
+    assert sales_list.status_code == 200
+    sales_slugs = [p["slug"] for p in sales_list.json()["items"]]
+    assert draft_slug not in sales_slugs
 
     # 6. Non-admin/manager cannot create or update blogs
     unauth_create = client.post(
@@ -164,8 +169,11 @@ def test_calculator_management_lifecycle(client: TestClient):
     assert admin_update.status_code == 200
     assert admin_update.json()["data"]["electricity_rate"] == 10.5
 
-    # 5. List submissions as staff
-    subs_list = client.get("/api/v1/calculators/submissions", headers=sales_hdr)
+    # 5. List submissions: Sales Rep is forbidden (403), Admin succeeds
+    sales_subs = client.get("/api/v1/calculators/submissions", headers=sales_hdr)
+    assert sales_subs.status_code == 403
+
+    subs_list = client.get("/api/v1/calculators/submissions", headers=admin_hdr)
     assert subs_list.status_code == 200
     ids = [s["id"] for s in subs_list.json()["items"]]
     assert submission_id in ids
@@ -351,11 +359,16 @@ def test_faq_management_lifecycle(client: TestClient):
     # 4. Public direct access to unpublished FAQ returns 404
     assert client.get(f"/api/v1/faqs/{unpub_id}").status_code == 404
 
-    # 5. Staff access returns unpublished FAQs
-    staff_faqs = client.get("/api/v1/faqs", headers=sales_hdr)
-    assert staff_faqs.status_code == 200
-    staff_ids = [f["id"] for f in staff_faqs.json()["data"]]
-    assert unpub_id in staff_ids
+    # 5. Admin access returns unpublished FAQs, Sales Rep access does not
+    admin_faqs = client.get("/api/v1/faqs", headers=admin_hdr)
+    assert admin_faqs.status_code == 200
+    admin_ids = [f["id"] for f in admin_faqs.json()["data"]]
+    assert unpub_id in admin_ids
+
+    sales_faqs = client.get("/api/v1/faqs", headers=sales_hdr)
+    assert sales_faqs.status_code == 200
+    sales_ids = [f["id"] for f in sales_faqs.json()["data"]]
+    assert unpub_id not in sales_ids
 
     # 6. Non-admin cannot create/edit/delete FAQ
     forbidden_create = client.post(

@@ -10,8 +10,12 @@ from app.core.security import decode_access_token
 from app.models.token import RevokedToken
 from app.models.user import User
 
-STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
-STAFF_ROLE_SET = {role.lower() for role in STAFF_ROLES}
+STAFF_ROLES = ["Admin", "Sales Rep"]
+STAFF_ROLE_SET = {"admin", "sales rep", "sales_rep"}
+
+
+def _clean_role(r: str) -> str:
+    return r.strip().casefold().replace("_", " ")
 
 oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/auth/login",
@@ -97,9 +101,8 @@ def _credentials_exception() -> HTTPException:
 def require_roles(allowed_roles: List[str]):
     """Role-based authorization dependency factory."""
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        # Normalize comparison (case-insensitive)
-        normalized_allowed = {role.strip().casefold() for role in allowed_roles}
-        if current_user.role.strip().casefold() not in normalized_allowed:
+        normalized_allowed = {_clean_role(role) for role in allowed_roles}
+        if _clean_role(current_user.role) not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Operation not permitted. Required roles: {', '.join(allowed_roles)}"
@@ -109,7 +112,7 @@ def require_roles(allowed_roles: List[str]):
 
 
 def require_admin(current_user: User = Depends(get_current_user)) -> User:
-    if current_user.role.strip().casefold() != "admin":
+    if _clean_role(current_user.role) != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Operation requires Administrator privileges."
@@ -127,4 +130,4 @@ def require_staff(current_user: User = Depends(get_current_user)) -> User:
 
 
 def is_staff_user(user: Optional[User]) -> bool:
-    return user is not None and user.role.strip().casefold() in STAFF_ROLE_SET
+    return user is not None and _clean_role(user.role) in {"admin", "sales rep"}

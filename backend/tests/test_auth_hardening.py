@@ -36,7 +36,7 @@ def test_signup_cannot_set_role(client):
     with Session(engine) as db:
         user = db.query(User).filter(User.email == "attacker@example.com").first()
         assert user is not None
-        assert user.role == "Customer"
+        assert user.role == "Sales Rep"
         assert user.status == "Active"
 
     # Verify duplicate signup returns identical generic response without revealing account existence
@@ -460,7 +460,7 @@ def test_user_management_changes_invalidate_existing_sessions(client):
     changed_role = client.patch(
         f"/api/v1/users/{target_id}",
         headers=admin_headers,
-        json={"role": "Support"},
+        json={"role": "Admin"},
     )
     assert changed_role.status_code == 200
     assert client.get("/api/v1/auth/me", headers=old_headers).status_code == 401

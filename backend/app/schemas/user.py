@@ -4,8 +4,17 @@ from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 from app.schemas.validators import AppEmailStr, StrongPasswordStr
 
-ALLOWED_ROLES = ["Admin", "Manager", "Sales Rep", "Support", "Customer"]
+ALLOWED_ROLES = ["Admin", "Sales Rep"]
 ALLOWED_STATUSES = ["Active", "Invited", "Inactive"]
+
+
+def normalize_role(v: str) -> str:
+    cleaned = v.strip().lower().replace("_", " ")
+    if cleaned == "admin":
+        return "Admin"
+    if cleaned in ("sales rep", "sales representative"):
+        return "Sales Rep"
+    raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
 
 
 class UserBase(BaseModel):
@@ -18,10 +27,7 @@ class UserBase(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        for allowed in ALLOWED_ROLES:
-            if v.strip().lower() == allowed.lower():
-                return allowed
-        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+        return normalize_role(v)
 
     @field_validator("status")
     @classmethod
@@ -44,10 +50,7 @@ class UserCreate(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        for allowed in ALLOWED_ROLES:
-            if v.strip().lower() == allowed.lower():
-                return allowed
-        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+        return normalize_role(v)
 
 
 class UserInviteRequest(BaseModel):
@@ -60,10 +63,7 @@ class UserInviteRequest(BaseModel):
     @field_validator("role")
     @classmethod
     def validate_role(cls, v: str) -> str:
-        for allowed in ALLOWED_ROLES:
-            if v.strip().lower() == allowed.lower():
-                return allowed
-        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+        return normalize_role(v)
 
 
 class UserUpdate(BaseModel):
@@ -80,10 +80,7 @@ class UserUpdate(BaseModel):
     def validate_role(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
-        for allowed in ALLOWED_ROLES:
-            if v.strip().lower() == allowed.lower():
-                return allowed
-        raise ValueError(f"Invalid role '{v}'. Allowed roles: {', '.join(ALLOWED_ROLES)}")
+        return normalize_role(v)
 
     @field_validator("status")
     @classmethod

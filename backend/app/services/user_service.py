@@ -146,9 +146,9 @@ class UserService:
     ) -> List[User]:
         query = db.query(User)
 
-        # Scoping: Managers can only view non-admin users (or team members)
-        if current_user and current_user.role == "Manager":
-            query = query.filter(User.role != "Admin")
+        # Scoping: Only Admin can list users
+        if current_user and current_user.role.strip().casefold() != "admin":
+            return []
 
         if search:
             s = f"%{search.strip()}%"
@@ -168,23 +168,13 @@ class UserService:
         if not user:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
-        # Authorization check
-        if current_user.role == "Admin":
+        # Authorization check: Admin can view any user; other users can only view self
+        if current_user.role.strip().casefold() == "admin" or current_user.id == user_id:
             return user
-        elif current_user.role == "Manager":
-            if user.role == "Admin":
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Managers cannot access administrator account details.",
-                )
-            return user
-        elif current_user.id == user_id:
-            return user
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="You do not have permission to view this user account.",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view this user account.",
+        )
 
     @staticmethod
     def update_user(
@@ -198,15 +188,12 @@ class UserService:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
         current_role = current_user.role.strip().casefold()
-        target_role = user.role.strip().casefold()
-        session_invalidated = False
-
-        # Managers cannot touch Admin accounts
-        if current_role == "manager" and target_role == "admin":
+        if current_role != "admin":
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Managers cannot modify administrator accounts.",
+                detail="Only administrators can modify user accounts.",
             )
+        session_invalidated = False
 
         # Email change check
         if request.email and request.email.lower().strip() != user.email.lower():
@@ -280,15 +267,10 @@ class UserService:
 
         # Status change validation (Deactivation / Activation)
         if request.status is not None and request.status != user.status:
-            if current_role not in {"admin", "manager"}:
+            if current_role != "admin":
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Insufficient permissions to change account status.",
-                )
-            if current_role == "manager" and user.role.strip().casefold() in {"admin", "manager"}:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Managers cannot modify status of administrative accounts.",
                 )
             if request.status == "Inactive" and user.role == "Admin":
                 active_admins = (
