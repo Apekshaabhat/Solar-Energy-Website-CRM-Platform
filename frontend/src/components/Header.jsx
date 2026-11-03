@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Leaf, ChevronDown, Search, ArrowRight, Menu, X, Sun, Moon } from 'lucide-react';
 import { useAuth, getDefaultRouteForRole } from '../context/AuthContext';
 
 export default function Header({ theme, isDark, toggleTheme, activePage, currentPage, navigate, setCurrentPage }) {
+  const routerNavigate = useNavigate();
   const { user, isAuthenticated, logout } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [calculatorsOpen, setCalculatorsOpen] = useState(false);
@@ -10,6 +12,18 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
   const nav = navigate || setCurrentPage;
   const rawCurrent = activePage || currentPage || 'home';
   const current = String(rawCurrent).toLowerCase().trim().replace(/^#\/*/, "").replace(/^\/*/, "");
+
+  const handleLoginClick = () => {
+    if (nav) nav('Login');
+    routerNavigate('/login');
+    setMobileMenuOpen(false);
+  };
+
+  const handleSignupClick = () => {
+    if (nav) nav('Signup');
+    routerNavigate('/signup');
+    setMobileMenuOpen(false);
+  };
 
   const navItems = [
     { id: 'home', label: 'Home' },
@@ -269,8 +283,8 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
               {/* Log In Button (Plain text, green when active) */}
               <button
                 type="button"
-                onClick={() => nav('Login')}
-                className="hidden xl:inline-flex items-center font-medium text-sm transition-colors py-2 px-3 focus:outline-none whitespace-nowrap"
+                onClick={handleLoginClick}
+                className="hidden lg:inline-flex items-center font-medium text-sm transition-colors py-2 px-3 focus:outline-none whitespace-nowrap cursor-pointer"
                 style={{
                   color: current.toLowerCase() === 'login' ? theme.green : theme.textMuted,
                 }}
@@ -291,8 +305,8 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
               {/* Sign Up Button (Filled green pill with right-arrow icon) */}
               <button
                 type="button"
-                onClick={() => nav('Signup')}
-                className="hidden xl:inline-flex items-center justify-center gap-2 font-medium text-sm px-5 py-2.5 rounded-full transition-colors text-white focus:outline-none whitespace-nowrap"
+                onClick={handleSignupClick}
+                className="hidden lg:inline-flex items-center justify-center gap-2 font-medium text-sm px-5 py-2.5 rounded-full transition-colors text-white focus:outline-none whitespace-nowrap cursor-pointer"
                 style={{ backgroundColor: theme.green }}
                 onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = theme.greenHover)}
                 onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = theme.green)}
@@ -307,7 +321,7 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="xl:hidden p-2 rounded-lg transition-colors focus:outline-none"
+            className="lg:hidden p-2 rounded-lg transition-colors focus:outline-none"
             style={{ color: theme.text }}
             aria-label="Toggle Navigation Menu"
           >
@@ -323,7 +337,7 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
       {/* Mobile Navigation Dropdown */}
       {mobileMenuOpen && (
         <div
-          className="xl:hidden border-b px-4 pt-2 pb-6 space-y-4 transition-colors"
+          className="lg:hidden border-b px-4 pt-2 pb-6 space-y-4 transition-colors"
           style={{
             backgroundColor: theme.bg,
             borderColor: theme.border,
@@ -451,11 +465,8 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
                 {/* Mobile Log In Entry */}
                 <button
                   type="button"
-                  onClick={() => {
-                    nav("Login");
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full text-left py-2.5 border-b transition-colors whitespace-nowrap ${
+                  onClick={handleLoginClick}
+                  className={`w-full text-left py-2.5 border-b transition-colors whitespace-nowrap cursor-pointer ${
                     current.toLowerCase() === "login" ? "font-bold" : "font-medium"
                   }`}
                   style={{
@@ -469,11 +480,8 @@ export default function Header({ theme, isDark, toggleTheme, activePage, current
                 {/* Mobile Sign Up Entry */}
                 <button
                   type="button"
-                  onClick={() => {
-                    nav("Signup");
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full text-left py-2.5 border-b transition-colors flex items-center justify-between whitespace-nowrap ${
+                  onClick={handleSignupClick}
+                  className={`w-full text-left py-2.5 border-b transition-colors flex items-center justify-between whitespace-nowrap cursor-pointer ${
                     current.toLowerCase() === "signup" ? "font-bold" : "font-medium"
                   }`}
                   style={{

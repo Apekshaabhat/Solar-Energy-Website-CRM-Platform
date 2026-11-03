@@ -159,7 +159,7 @@ export default function App() {
               <Route
                 index
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <Dashboard />
                   </ProtectedRoute>
                 }
@@ -167,7 +167,7 @@ export default function App() {
               <Route
                 path="customers"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <Customers />
                   </ProtectedRoute>
                 }
@@ -175,7 +175,7 @@ export default function App() {
               <Route
                 path="leads"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <Leads />
                   </ProtectedRoute>
                 }
@@ -183,7 +183,7 @@ export default function App() {
               <Route
                 path="site-surveys"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <SiteSurveys />
                   </ProtectedRoute>
                 }
@@ -191,7 +191,7 @@ export default function App() {
               <Route
                 path="projects"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <Projects />
                   </ProtectedRoute>
                 }
@@ -199,7 +199,7 @@ export default function App() {
               <Route
                 path="blog"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                  <ProtectedRoute allowedRoles={["Admin"]}>
                     <BlogManagement />
                   </ProtectedRoute>
                 }
@@ -207,7 +207,7 @@ export default function App() {
               <Route
                 path="calculators"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin"]}>
                     <Calculators />
                   </ProtectedRoute>
                 }
@@ -215,7 +215,7 @@ export default function App() {
               <Route
                 path="faqs"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager", "Sales Rep", "Support"]}>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <Faqs />
                   </ProtectedRoute>
                 }
@@ -223,7 +223,7 @@ export default function App() {
               <Route
                 path="users"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                  <ProtectedRoute allowedRoles={["Admin"]}>
                     <Users />
                   </ProtectedRoute>
                 }
@@ -231,7 +231,7 @@ export default function App() {
               <Route
                 path="settings"
                 element={
-                  <ProtectedRoute allowedRoles={["Admin", "Manager"]}>
+                  <ProtectedRoute allowedRoles={["Admin"]}>
                     <Settings />
                   </ProtectedRoute>
                 }
@@ -239,7 +239,7 @@ export default function App() {
               <Route
                 path="profile"
                 element={
-                  <ProtectedRoute>
+                  <ProtectedRoute allowedRoles={["Admin", "Sales Rep"]}>
                     <MyProfile />
                   </ProtectedRoute>
                 }
@@ -260,6 +260,14 @@ export default function App() {
               element={
                 <PublicOnlyRoute>
                   <SignupPage theme={theme} />
+                </PublicOnlyRoute>
+              }
+            />
+            <Route
+              path="/forgot-password"
+              element={
+                <PublicOnlyRoute>
+                  <ForgotPasswordPage theme={theme} />
                 </PublicOnlyRoute>
               }
             />

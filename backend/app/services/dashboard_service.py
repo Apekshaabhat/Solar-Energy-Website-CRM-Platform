@@ -36,11 +36,11 @@ ACTIVITY_CONFIGS = {
     "site_survey": {"icon": "calendar", "tint": "bg-leaf-600"},
     "project": {"icon": "check", "tint": "bg-amber-accent"},
 }
-MANAGER_ROLES = {"admin", "manager"}
+MANAGER_ROLES = {"admin"}
 
 
 def _is_manager(user: User) -> bool:
-    return user.role.lower() in MANAGER_ROLES
+    return user.role.strip().casefold() in MANAGER_ROLES
 
 
 def _leads_query(db: Session, user: User) -> SQLAlchemyQuery[Lead]:
@@ -53,24 +53,44 @@ def _leads_query(db: Session, user: User) -> SQLAlchemyQuery[Lead]:
 def _customers_query(db: Session, user: User) -> SQLAlchemyQuery[Customer]:
     query = db.query(Customer)
     if not _is_manager(user):
-        query = query.filter(Customer.assigned_user_id == user.id)
+        lead_customer_ids = select(Lead.customer_id).where(
+            Lead.assigned_user_id == user.id,
+            Lead.customer_id.isnot(None),
+        )
+        query = query.filter(
+            or_(
+                Customer.assigned_user_id == user.id,
+                Customer.id.in_(lead_customer_ids),
+            )
+        )
     return query
 
 
 def _surveys_query(db: Session, user: User) -> SQLAlchemyQuery[SiteSurvey]:
     query = db.query(SiteSurvey)
     if not _is_manager(user):
-        query = query.filter(SiteSurvey.assigned_user_id == user.id)
+        lead_ids = select(Lead.id).where(Lead.assigned_user_id == user.id)
+        customer_ids = select(Customer.id).where(Customer.assigned_user_id == user.id)
+        query = query.filter(
+            or_(
+                SiteSurvey.assigned_user_id == user.id,
+                SiteSurvey.assigned_to == user.name,
+                SiteSurvey.lead_id.in_(lead_ids),
+                SiteSurvey.customer_id.in_(customer_ids),
+            )
+        )
     return query
 
 
 def _projects_query(db: Session, user: User) -> SQLAlchemyQuery[Project]:
     query = db.query(Project)
     if not _is_manager(user):
+        lead_ids = select(Lead.id).where(Lead.assigned_user_id == user.id)
         query = query.outerjoin(Customer, Project.customer_id == Customer.id).filter(
             or_(
                 Project.assigned_user_id == user.id,
                 Customer.assigned_user_id == user.id,
+                Project.source_lead_id.in_(lead_ids),
             )
         )
     return query
@@ -82,14 +102,30 @@ def _activities_query(db: Session, user: User) -> SQLAlchemyQuery[Activity]:
         return query
 
     visible_leads = select(Lead.id).where(Lead.assigned_user_id == user.id)
-    visible_customers = select(Customer.id).where(Customer.assigned_user_id == user.id)
-    visible_surveys = select(SiteSurvey.id).where(SiteSurvey.assigned_user_id == user.id)
+    lead_customer_ids = select(Lead.customer_id).where(
+        Lead.assigned_user_id == user.id,
+        Lead.customer_id.isnot(None),
+    )
+    visible_customers = select(Customer.id).where(
+        or_(
+            Customer.assigned_user_id == user.id,
+            Customer.id.in_(lead_customer_ids),
+        )
+    )
+    visible_surveys = select(SiteSurvey.id).where(
+        or_(
+            SiteSurvey.assigned_user_id == user.id,
+            SiteSurvey.assigned_to == user.name,
+            SiteSurvey.lead_id.in_(visible_leads),
+        )
+    )
     visible_projects = select(Project.id).outerjoin(
         Customer, Project.customer_id == Customer.id
     ).where(
         or_(
             Project.assigned_user_id == user.id,
             Customer.assigned_user_id == user.id,
+            Project.source_lead_id.in_(visible_leads),
         )
     )
 

@@ -13,12 +13,9 @@ function getRoleBadge(role) {
   switch (role) {
     case "Admin":
       return "bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-800/50";
-    case "Manager":
-      return "bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-800/50";
     case "Sales Rep":
+    case "sales_rep":
       return "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800/50";
-    case "Support":
-      return "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-800/50";
     default:
       return "bg-gray-50 text-gray-700 border-gray-200 dark:bg-gray-900 dark:text-gray-300 dark:border-gray-800";
   }
@@ -146,10 +143,10 @@ export default function Users() {
     <div className="space-y-6 max-w-7xl mx-auto">
       <div>
         <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">
-          Users
+          Sales Management
         </h1>
         <p className="text-sm sm:text-base text-gray-500 dark:text-gray-400 mt-1">
-          Manage team members and their access levels.
+          Manage sales team accounts and administrative privileges.
         </p>
       </div>
 
@@ -164,7 +161,7 @@ export default function Users() {
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 pointer-events-none" />
           <input
             type="text"
-            placeholder="Search users by name or email..."
+            placeholder="Search accounts by name or email..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2.5 bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
@@ -177,7 +174,7 @@ export default function Users() {
           className="inline-flex items-center justify-center gap-2 bg-[#1F5C3E] hover:bg-[#184931] text-white text-sm font-medium rounded-xl px-4 py-2.5 transition-colors shadow-sm cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>Invite / Add User</span>
+          <span>Invite / Add Sales Rep</span>
         </button>
       </div>
 
@@ -290,7 +287,7 @@ export default function Users() {
           <div className="bg-white dark:bg-[#17221B] border border-gray-200 dark:border-[#293227] rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-gray-100 dark:border-[#293227] pb-3">
               <h3 className="text-lg font-bold text-gray-900 dark:text-white">
-                {editingUser ? "Edit User" : "Add New User"}
+                {editingUser ? "Edit Account" : "Add Account"}
               </h3>
               <button
                 type="button"
@@ -354,10 +351,7 @@ export default function Users() {
                     className="w-full px-3.5 py-2.5 bg-white dark:bg-[#0E1712] border border-gray-200 dark:border-[#293227] rounded-xl text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#1F5C3E]/30"
                   >
                     <option value="Admin">Admin</option>
-                    <option value="Manager">Manager</option>
                     <option value="Sales Rep">Sales Rep</option>
-                    <option value="Support">Support</option>
-                    <option value="Customer">Customer</option>
                   </select>
                 </div>
 

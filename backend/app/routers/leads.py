@@ -29,13 +29,16 @@ router = APIRouter(prefix="/leads", tags=["Leads Management"])
 
 LEAD_STATUSES = ["New", "Contacted", "Site Survey", "Quoted", "Converted", "Cancelled", "Lost"]
 
-STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
-LEAD_MANAGER_ROLES = {"admin", "manager"}
+STAFF_ROLES = ["Admin", "Sales Rep"]
+LEAD_MANAGER_ROLES = {"admin"}
 NULLABLE_LEAD_FIELDS = {"email", "phone", "notes", "estimated_value", "assigned_user_id", "customer_id"}
+SALES_EDITABLE_LEAD_FIELDS = {
+    "name", "contact", "email", "phone", "location", "property_type", "source", "notes", "estimated_value", "status"
+}
 
 
 def is_lead_manager(user: User) -> bool:
-    return user.role.lower() in LEAD_MANAGER_ROLES
+    return user.role.strip().casefold() in LEAD_MANAGER_ROLES
 
 
 def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
@@ -49,7 +52,8 @@ def validate_user_reference(db: Session, user_id: Optional[int]) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot assign lead to an inactive user account."
         )
-    if target_user.role not in STAFF_ROLES:
+    user_role = target_user.role.strip().casefold().replace("_", " ")
+    if user_role not in {"admin", "sales rep"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot assign lead to a non-staff user account."
@@ -66,23 +70,14 @@ def validate_customer_reference(db: Session, customer_id: Optional[int]) -> None
 
 
 def check_lead_access(lead: Lead, current_user: User) -> None:
-    if current_user.role in ["Admin", "Manager"]:
+    if current_user.role.strip().casefold() == "admin":
         return
-    if current_user.role == "Customer":
-        if not current_user.customer_id or lead.customer_id != current_user.customer_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: You are not authorized to view this lead."
-            )
+    if lead.assigned_user_id == current_user.id:
         return
-    if current_user.role in ["Sales Rep", "Support"]:
-        if lead.assigned_user_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: You may only access leads assigned to you."
-            )
-        return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Access denied: You may only access leads assigned to you."
+    )
 
 
 def apply_lead_update(lead: Lead, update_data: dict) -> None:
@@ -123,19 +118,10 @@ def list_leads(
     source: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
+    current_user: User = Depends(require_roles(["Admin", "Sales Rep"])),
     db: Session = Depends(get_db),
 ):
     query = accessible_leads_query(db, current_user)
-
-    # Record-level access scoping
-    if current_user.role in ["Sales Rep", "Support"]:
-        query = query.filter(Lead.assigned_user_id == current_user.id)
-    elif current_user.role == "Customer":
-        if current_user.customer_id:
-            query = query.filter(Lead.customer_id == current_user.customer_id)
-        else:
-            query = query.filter(Lead.email == current_user.email)
 
 
     if search:
@@ -204,15 +190,11 @@ def create_lead(
     is_staff = is_staff_user(current_user)
     assigned_user_id = None
     if is_staff:
-        if is_lead_manager(current_user):
+        if current_user.role.strip().casefold() == "admin":
             assigned_user_id = request.assigned_user_id
             validate_user_reference(db, assigned_user_id)
         else:
-            if request.assigned_user_id not in (None, current_user.id):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only administrators and managers can assign leads to other users",
-                )
+            # Sales Representatives always own the leads they create
             assigned_user_id = current_user.id
         validate_customer_reference(db, request.customer_id)
 
@@ -263,7 +245,7 @@ def create_lead(
     else:
         NotificationService.notify_roles(
             db=db,
-            roles=["Admin", "Manager"],
+            roles=["Admin"],
             title="New Lead Received",
             message=f"New lead received: '{lead.name}' from {lead.source}.",
             notification_type="new_lead",
@@ -284,7 +266,7 @@ def create_lead(
 )
 def get_lead(
     lead_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
+    current_user: User = Depends(require_roles(["Admin", "Sales Rep"])),
     db: Session = Depends(get_db),
 ):
     lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()
@@ -302,7 +284,7 @@ def get_lead(
 def update_lead(
     lead_id: int,
     request: LeadUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
+    current_user: User = Depends(require_roles(["Admin", "Sales Rep"])),
     db: Session = Depends(get_db),
 ):
     lead = accessible_leads_query(db, current_user).filter(Lead.id == lead_id).first()
@@ -312,6 +294,20 @@ def update_lead(
 
     old_status = lead.status
     update_data = request.model_dump(exclude_unset=True)
+    is_admin = current_user.role.strip().casefold() == "admin"
+
+    if not is_admin:
+        if "assigned_user_id" in update_data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only administrators can assign or reassign leads.",
+            )
+        if "customer_id" in update_data:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Sales Representatives cannot modify customer linkage directly.",
+            )
+
     changed_fields = [
         field for field, value in update_data.items()
         if getattr(lead, field) != value
@@ -331,10 +327,10 @@ def update_lead(
 
     # Lead assignment validation & audit
     if "assigned_user_id" in update_data and update_data["assigned_user_id"] != lead.assigned_user_id:
-        if current_user.role not in ["Admin", "Manager"]:
+        if not is_admin:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only administrators and managers can assign or reassign leads."
+                detail="Only administrators can assign or reassign leads."
             )
         target_user = validate_user_reference(db, update_data["assigned_user_id"])
         old_user = db.query(User).filter(User.id == lead.assigned_user_id).first() if lead.assigned_user_id else None
@@ -399,6 +395,11 @@ def contact_lead(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == "Sales Rep":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sales Representatives are not authorized to update leads to contacted. View only access.",
+        )
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
@@ -419,6 +420,11 @@ def schedule_lead_survey(
     current_user: User = Depends(require_roles(STAFF_ROLES)),
     db: Session = Depends(get_db),
 ):
+    if current_user.role == "Sales Rep":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sales Representatives are not authorized to book site surveys. View only access.",
+        )
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
     if not lead:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lead not found")
@@ -561,7 +567,7 @@ def cancel_lead(
 )
 def delete_lead(
     lead_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     lead = db.query(Lead).filter(Lead.id == lead_id).first()

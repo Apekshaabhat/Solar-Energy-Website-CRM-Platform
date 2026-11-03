@@ -9,7 +9,7 @@ from app.schemas.dashboard import DashboardSummaryResponse
 from app.schemas.common import APIResponse
 from app.services.dashboard_service import DashboardService
 
-_dashboard_access = require_roles(["Admin", "Manager", "Sales Rep", "Support"])
+_dashboard_access = require_roles(["Admin", "Sales Rep"])
 
 router = APIRouter(
     prefix="/dashboard",

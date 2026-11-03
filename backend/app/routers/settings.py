@@ -18,10 +18,10 @@ router = APIRouter(prefix="/settings", tags=["System Settings"])
     "",
     response_model=APIResponse[SystemSettingsResponse],
     summary="Get system and workspace settings",
-    description="Retrieve workspace preferences. Restricted to Administrators and Managers.",
+    description="Retrieve workspace preferences. Restricted to Administrators.",
 )
 def get_settings(
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     settings_obj = db.query(SystemSettings).order_by(SystemSettings.id.asc()).first()
@@ -53,11 +53,11 @@ def get_settings(
     "",
     response_model=APIResponse[SystemSettingsResponse],
     summary="Update system and workspace settings",
-    description="Update workspace preferences. Global company details and 2FA require Administrator privileges.",
+    description="Update workspace preferences. Requires Administrator privileges.",
 )
 def update_settings(
     request: SystemSettingsUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     settings_obj = db.query(SystemSettings).order_by(SystemSettings.id.asc()).first()

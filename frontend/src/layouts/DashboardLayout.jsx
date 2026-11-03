@@ -18,48 +18,57 @@ import Topbar from "../components/dashboard/Topbar";
 import { useAuth } from "../context/AuthContext";
 
 const ALL_NAV_ITEMS = [
-  { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Leads", icon: Users2, to: "/dashboard/leads", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Customers", icon: UserSquare2, to: "/dashboard/customers", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Site Surveys", icon: ClipboardCheck, to: "/dashboard/site-surveys", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Projects", icon: FolderKanban, to: "/dashboard/projects", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Calculators", icon: Calculator, to: "/dashboard/calculators", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Blog Management", icon: FileText, to: "/dashboard/blog", roles: ["Admin", "Manager"] },
-  { label: "FAQs", icon: HelpCircle, to: "/dashboard/faqs", roles: ["Admin", "Manager", "Sales Rep", "Support"] },
-  { label: "Users", icon: UserSquare2, to: "/dashboard/users", roles: ["Admin", "Manager"] },
+  { label: "Dashboard", icon: LayoutDashboard, to: "/dashboard", roles: ["Admin", "Sales Rep"] },
+  { label: "Leads", icon: Users2, to: "/dashboard/leads", roles: ["Admin", "Sales Rep"] },
+  { label: "Customers", icon: UserSquare2, to: "/dashboard/customers", roles: ["Admin", "Sales Rep"] },
+  { label: "Projects", icon: FolderKanban, to: "/dashboard/projects", roles: ["Admin", "Sales Rep"] },
+  { label: "Site Surveys", icon: ClipboardCheck, to: "/dashboard/site-surveys", roles: ["Admin", "Sales Rep"] },
+  { label: "Calculators", icon: Calculator, to: "/dashboard/calculators", roles: ["Admin"] },
+  { label: "Blog Management", icon: FileText, to: "/dashboard/blog", roles: ["Admin"] },
+  { label: "FAQs", icon: HelpCircle, to: "/dashboard/faqs", roles: ["Admin", "Sales Rep"] },
+  { label: "Sales Management", icon: Users, to: "/dashboard/users", roles: ["Admin"] },
+  { label: "My Profile", icon: UserSquare2, to: "/dashboard/profile", roles: ["Admin", "Sales Rep"] },
 ];
 
 export default function DashboardLayout() {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
 
-  const userRole = (user?.role || "").toLowerCase();
+  const userRole = (user?.role || "").toLowerCase().trim();
+  const isSalesRep = userRole === "sales rep" || userRole === "sales_rep";
+  const isAdmin = userRole === "admin";
+
   const navItems = ALL_NAV_ITEMS.filter((item) => {
     if (!item.roles) return true;
-    return item.roles.some((r) => r.toLowerCase() === userRole);
+    return item.roles.some((r) => {
+      const target = r.toLowerCase();
+      if (target === "sales rep" && isSalesRep) return true;
+      if (target === "admin" && isAdmin) return true;
+      return target === userRole;
+    });
   });
-  const canAccessSettings = ["admin", "manager"].includes(userRole);
+  const canAccessSettings = isAdmin;
 
   return (
-    <div className="flex min-h-screen bg-[#FBFAF6] dark:bg-[#0E1712] font-sans transition-colors duration-200">
+    <div className="flex h-screen overflow-hidden bg-[#FBFAF6] dark:bg-[#0E1712] font-sans transition-colors duration-200">
       {/* Dark Sidebar */}
-      <aside className="w-64 min-h-screen bg-[#0E1712] dark:bg-[#0A0F0B] text-white flex flex-col justify-between p-4 flex-shrink-0 border-r border-[#293227] dark:border-[#1C2A21] transition-colors duration-200">
-        <div>
+      <aside className="w-64 h-screen sticky top-0 bg-[#0E1712] dark:bg-[#0A0F0B] text-white flex flex-col justify-between p-4 flex-shrink-0 border-r border-[#293227] dark:border-[#1C2A21] transition-colors duration-200 z-30">
+        <div className="flex flex-col min-h-0 flex-1">
           {/* Top Logo + Brand */}
-          <div className="flex items-center gap-3 px-2 py-3 mb-6">
+          <div className="flex items-center gap-3 px-2 py-3 mb-6 shrink-0">
             <div className="w-10 h-10 rounded-full bg-[#1F5C3E] flex items-center justify-center flex-shrink-0 shadow-sm">
               <Leaf className="w-5 h-5 text-white" />
             </div>
             <div className="flex flex-col">
               <span className="font-bold text-lg tracking-tight leading-none text-white">SOLARA</span>
               <span className="text-[11px] font-medium tracking-tight text-white/60 mt-1">
-                {user?.role ? `${user.role} Dashboard` : "Admin Dashboard"}
+                {isAdmin ? "Admin Portal" : "Sales Portal"}
               </span>
             </div>
           </div>
 
           {/* Nav List */}
-          <nav className="space-y-1.5">
+          <nav className="space-y-1.5 overflow-y-auto flex-1 pr-1">
             {navItems.map(({ label, icon: Icon, to }) => (
               <NavLink
                 key={label}
@@ -79,7 +88,7 @@ export default function DashboardLayout() {
         </div>
 
         {/* Bottom Section */}
-        <div className="pt-4 mt-auto border-t border-white/10 space-y-1.5">
+        <div className="pt-4 mt-auto border-t border-white/10 space-y-1.5 shrink-0">
           {canAccessSettings && (
             <NavLink
               to="/dashboard/settings"
@@ -109,7 +118,7 @@ export default function DashboardLayout() {
       </aside>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col min-w-0 bg-[#FBFAF6] dark:bg-[#0E1712] transition-colors duration-200">
+      <div className="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto bg-[#FBFAF6] dark:bg-[#0E1712] transition-colors duration-200">
         <Topbar />
         <main className="flex-1 p-6 sm:p-8 bg-[#FBFAF6] dark:bg-[#0E1712] text-ink-900 dark:text-[#F3F6F1] transition-colors duration-200">
           <Outlet />

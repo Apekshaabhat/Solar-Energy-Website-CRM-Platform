@@ -11,6 +11,7 @@ import { FormField, TextInput, SelectInput } from "../../components/dashboard/Fo
 import { todayISO } from "../../utils/dashboardDate";
 import { siteSurveysApi } from "../../api/siteSurveys";
 import { useDashboardData } from "../../context/DashboardDataContext";
+import { useAuth } from "../../context/AuthContext";
 
 const surveyTabOrder = [
   "All Surveys",
@@ -58,6 +59,8 @@ const emptyForm = {
 
 export default function SiteSurveys() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = user?.role?.toLowerCase()?.trim() === "admin";
   const { refreshToken, notifyCrmChange } = useDashboardData();
   const [surveys, setSurveys] = useState([]);
   const [tabCounts, setTabCounts] = useState({});
@@ -410,69 +413,73 @@ export default function SiteSurveys() {
                       <StatusBadge status={survey.status} />
                     </td>
                     <td className="relative py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {/* Status = Scheduled: Start Survey | Cancel Survey */}
-                        {survey.status === "Scheduled" && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleStartSurvey(survey)}
-                              disabled={saving}
-                              className="inline-flex items-center gap-1 text-xs bg-leaf-600 hover:bg-leaf-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Start survey (moves to In Progress)"
-                            >
-                              <Play className="w-3.5 h-3.5" />
-                              Start Survey
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCancelSurvey(survey)}
-                              disabled={saving}
-                              className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Cancel site survey"
-                            >
-                              <XCircle className="w-3.5 h-3.5" />
-                              Cancel
-                            </button>
-                          </>
-                        )}
+                      {isAdmin ? (
+                        <div className="flex items-center justify-end gap-1.5">
+                          {/* Status = Scheduled: Start Survey | Cancel Survey */}
+                          {survey.status === "Scheduled" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => handleStartSurvey(survey)}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1 text-xs bg-leaf-600 hover:bg-leaf-700 text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Start survey (moves to In Progress)"
+                              >
+                                <Play className="w-3.5 h-3.5" />
+                                Start Survey
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelSurvey(survey)}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Cancel site survey"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                Cancel
+                              </button>
+                            </>
+                          )}
 
-                        {/* Status = In Progress: Complete Survey | Cancel Survey */}
-                        {survey.status === "In Progress" && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => openCompleteModal(survey)}
-                              disabled={saving}
-                              className="inline-flex items-center gap-1 text-xs bg-[#1F5C3E] hover:bg-[#184A32] text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Complete survey and automatically update Lead to Quoted"
-                            >
-                              <CheckCircle2 className="w-3.5 h-3.5" />
-                              Complete Survey
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleCancelSurvey(survey)}
-                              disabled={saving}
-                              className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
-                              title="Cancel site survey"
-                            >
-                              <XCircle className="w-3.5 h-3.5" />
-                              Cancel
-                            </button>
-                          </>
-                        )}
+                          {/* Status = In Progress: Complete Survey | Cancel Survey */}
+                          {survey.status === "In Progress" && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openCompleteModal(survey)}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1 text-xs bg-[#1F5C3E] hover:bg-[#184A32] text-white px-2.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Complete survey and automatically update Lead to Quoted"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Complete Survey
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleCancelSurvey(survey)}
+                                disabled={saving}
+                                className="inline-flex items-center gap-1 text-xs text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 border border-red-200 px-2 py-1.5 rounded-lg transition-colors cursor-pointer"
+                                title="Cancel site survey"
+                              >
+                                <XCircle className="w-3.5 h-3.5" />
+                                Cancel
+                              </button>
+                            </>
+                          )}
 
-                        {/* Edit Technical Notes Button */}
-                        <button
-                          type="button"
-                          onClick={() => openEditModal(survey)}
-                          className="p-1.5 rounded-lg text-ink-400 hover:text-ink-900 dark:hover:text-[#F3F6F1] transition-colors"
-                          title="Edit survey notes"
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                          {/* Edit Technical Notes Button */}
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(survey)}
+                            className="p-1.5 rounded-lg text-ink-400 hover:text-ink-900 dark:hover:text-[#F3F6F1] transition-colors"
+                            title="Edit survey notes"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-ink-400 font-medium">Read-only</span>
+                      )}
                     </td>
                   </tr>
                 ))}

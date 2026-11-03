@@ -27,8 +27,8 @@ def list_faqs(
     db: Session = Depends(get_db),
 ):
     query = db.query(FAQ)
-    is_staff = is_staff_user(current_user)
-    if published_only or not is_staff:
+    is_admin = current_user is not None and current_user.role.strip().casefold() == "admin"
+    if published_only or not is_admin:
         query = query.filter(FAQ.is_published == True)
 
     if search:
@@ -54,7 +54,7 @@ def list_faqs(
 )
 def create_faq(
     request: FAQCreate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     faq = FAQ(
@@ -87,8 +87,8 @@ def get_faq(
     faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
     if not faq:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FAQ not found")
-    is_staff = is_staff_user(current_user)
-    if not faq.is_published and not is_staff:
+    is_admin = current_user is not None and current_user.role.strip().casefold() == "admin"
+    if not faq.is_published and not is_admin:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="FAQ not found")
     return APIResponse(success=True, data=FAQResponse.model_validate(faq))
 
@@ -101,7 +101,7 @@ def get_faq(
 def update_faq(
     faq_id: int,
     request: FAQUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     faq = db.query(FAQ).filter(FAQ.id == faq_id).first()
@@ -129,7 +129,7 @@ def update_faq(
 )
 def delete_faq(
     faq_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     faq = db.query(FAQ).filter(FAQ.id == faq_id).first()

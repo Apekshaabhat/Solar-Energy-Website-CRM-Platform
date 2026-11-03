@@ -66,6 +66,7 @@ def test_legacy_pending_customer_can_login_without_activation(client):
     with Session(engine) as db:
         user = db.query(User).filter_by(email="legacy-customer@example.com").one()
         user.status = "Pending"
+        user.role = "Customer"
         db.commit()
 
     login = client.post(

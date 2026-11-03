@@ -64,9 +64,9 @@ export default function LoginPage({ theme = { bg: '#FBFAF6', card: '#FFFFFF', bo
 
   return (
     <AuthShell
-      eyebrow="Welcome back"
-      title="Log in to your account"
-      subtitle="Access your SOLARA dashboard, energy tracking, and customized solar quotes."
+      eyebrow="CRM Portal"
+      title="Log in to SOLARA CRM"
+      subtitle="Access your Sales Representative workspace or Admin management portal."
       footer={footer}
       theme={theme}
     >

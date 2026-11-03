@@ -154,7 +154,7 @@ def list_submissions(
     property_type: Optional[str] = Query(None, description="Filter by property type"),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     query = db.query(CalculatorSubmission)
@@ -238,7 +238,7 @@ def create_submission(
 )
 def get_submission(
     submission_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     sub = db.query(CalculatorSubmission).filter(CalculatorSubmission.id == submission_id).first()
@@ -257,7 +257,7 @@ def get_submission(
 )
 def delete_submission(
     submission_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     sub = db.query(CalculatorSubmission).filter(CalculatorSubmission.id == submission_id).first()
@@ -293,7 +293,7 @@ def get_calculator_settings(
 )
 def update_calculator_settings(
     request: CalculatorSettingsUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     settings_obj = get_or_create_settings(db)

@@ -37,9 +37,9 @@ def list_blogs(
     db: Session = Depends(get_db),
 ):
     query = db.query(BlogPost)
-    is_staff = is_staff_user(current_user)
+    is_admin = current_user is not None and current_user.role.strip().casefold() == "admin"
 
-    if not is_staff:
+    if not is_admin:
         query = query.filter(BlogPost.status == "Published")
 
     if search:
@@ -49,7 +49,7 @@ def list_blogs(
     if category and category not in ["All", "All Categories"]:
         query = query.filter(BlogPost.category.ilike(category))
 
-    if status_filter and status_filter not in ["All", "All Status", "All Statuses"] and is_staff:
+    if status_filter and status_filter not in ["All", "All Status", "All Statuses"] and is_admin:
         query = query.filter(BlogPost.status.ilike(status_filter))
 
     total = query.count()
@@ -77,7 +77,7 @@ def list_blogs(
 )
 def create_blog(
     request: BlogCreate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     base_slug = request.slug or generate_slug(request.title)
@@ -127,8 +127,8 @@ def get_blog(
 
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog post not found")
-    is_staff = is_staff_user(current_user)
-    if post.status != "Published" and not is_staff:
+    is_admin = current_user is not None and current_user.role.strip().casefold() == "admin"
+    if post.status != "Published" and not is_admin:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Blog post not found")
     return APIResponse(success=True, data=BlogResponse.model_validate(post))
 
@@ -141,7 +141,7 @@ def get_blog(
 def update_blog(
     post_id: int,
     request: BlogUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()
@@ -176,7 +176,7 @@ def update_blog(
 )
 def delete_blog(
     post_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     post = db.query(BlogPost).filter(BlogPost.id == post_id).first()

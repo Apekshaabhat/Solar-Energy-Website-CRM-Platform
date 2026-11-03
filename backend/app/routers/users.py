@@ -35,7 +35,7 @@ router = APIRouter(prefix="/users", tags=["Users Management"])
     description="Returns total users, active/inactive counts, pending invitations, and users by role.",
 )
 def get_user_stats(
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     stats_data = UserService.get_user_stats(db)
@@ -50,13 +50,13 @@ def get_user_stats(
     "",
     response_model=APIResponse[List[UserResponse]],
     summary="List users with search, role, and status filters",
-    description="Retrieve users list. Admin views all users; Managers view non-administrative staff.",
+    description="Retrieve users list. Admin views all workforce accounts.",
 )
 def list_users(
     search: Optional[str] = Query(None, description="Search by name, email, or phone"),
     role: Optional[str] = Query(None, description="Filter by role"),
     status_filter: Optional[str] = Query(None, alias="status", description="Filter by status"),
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     users = UserService.list_users(
@@ -185,12 +185,12 @@ def get_user(
     "/{user_id}",
     response_model=APIResponse[UserResponse],
     summary="Update user details",
-    description="Allows authorized updates. Only Admin can change roles; last admin cannot be demoted or deactivated.",
+    description="Allows authorized updates. Only Admin can change roles or accounts; last admin cannot be demoted or deactivated.",
 )
 def update_user(
     user_id: int,
     request: UserUpdate,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     user = UserService.update_user(db, user_id, request, current_user)

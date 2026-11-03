@@ -33,7 +33,7 @@ from app.services.notification_service import NotificationService
 router = APIRouter(prefix="/site-surveys", tags=["Site Surveys Management"])
 
 SURVEY_STATUSES = ["Scheduled", "In Progress", "Completed", "Cancelled"]
-STAFF_ROLES = ["Admin", "Manager", "Sales Rep", "Support"]
+STAFF_ROLES = ["Admin", "Sales Rep"]
 NULLABLE_SURVEY_FIELDS = {
     "customer_id",
     "project_id",
@@ -43,7 +43,7 @@ NULLABLE_SURVEY_FIELDS = {
     "capacity_estimate",
     "notes",
 }
-SURVEY_MANAGER_ROLES = {"admin", "manager"}
+SURVEY_MANAGER_ROLES = {"admin"}
 
 
 def is_survey_manager(user: User) -> bool:
@@ -55,20 +55,16 @@ def accessible_surveys_query(db: Session, current_user: User):
     if is_survey_manager(current_user):
         return query
     if is_staff_user(current_user):
-        return query.filter(SiteSurvey.assigned_user_id == current_user.id)
-    if current_user.role.strip().casefold() == "customer":
         return (
-            query.join(Customer, SiteSurvey.customer_id == Customer.id)
-            .outerjoin(Project, SiteSurvey.project_id == Project.id)
+            query.outerjoin(Customer, SiteSurvey.customer_id == Customer.id)
+            .outerjoin(Lead, SiteSurvey.lead_id == Lead.id)
             .filter(
                 or_(
-                    Customer.account_user_id == current_user.id,
-                    Customer.id == current_user.customer_id,
-                ),
-                or_(
-                    SiteSurvey.project_id.is_(None),
-                    Project.customer_id == SiteSurvey.customer_id,
-                ),
+                    SiteSurvey.assigned_user_id == current_user.id,
+                    SiteSurvey.assigned_to == current_user.name,
+                    Customer.assigned_user_id == current_user.id,
+                    Lead.assigned_user_id == current_user.id,
+                )
             )
         )
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Operation not permitted")
@@ -161,22 +157,20 @@ def validate_lead_reference(db: Session, lead_id: Optional[int]) -> None:
 
 def check_survey_access(survey: SiteSurvey, current_user: User) -> None:
     role = current_user.role.strip().casefold()
-    if role in {"admin", "manager"}:
+    if role == "admin":
         return
-    if current_user.role == "Customer":
-        if not current_user.customer_id or survey.customer_id != current_user.customer_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: You are not authorized to view this site survey."
-            )
-        return
-    if role in {"sales rep", "support"}:
-        if survey.assigned_user_id != current_user.id and survey.assigned_to != current_user.name:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Access denied: You may only access site surveys assigned to you."
-            )
-        return
+    if role in {"sales rep", "sales_rep"}:
+        if (
+            survey.assigned_user_id == current_user.id
+            or survey.assigned_to == current_user.name
+            or (survey.customer and survey.customer.assigned_user_id == current_user.id)
+            or (survey.lead and survey.lead.assigned_user_id == current_user.id)
+        ):
+            return
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied: You may only access site surveys assigned to you or your authorized leads/customers."
+        )
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied.")
 
 
@@ -208,19 +202,10 @@ def list_surveys(
     property_type: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
+    current_user: User = Depends(require_roles(["Admin", "Sales Rep"])),
     db: Session = Depends(get_db),
 ):
     query = accessible_surveys_query(db, current_user)
-
-    # Scoping
-    if current_user.role in ["Sales Rep", "Support"]:
-        query = query.filter(or_(SiteSurvey.assigned_user_id == current_user.id, SiteSurvey.assigned_to == current_user.name))
-    elif current_user.role == "Customer":
-        if current_user.customer_id:
-            query = query.filter(SiteSurvey.customer_id == current_user.customer_id)
-        else:
-            query = query.filter(SiteSurvey.customer_name == current_user.name)
 
 
     if search:
@@ -338,17 +323,15 @@ def create_survey(
     survey_status = "Scheduled"
     assigned_to = "Rahul"
 
-    if current_user is not None and is_staff:
-        if is_survey_manager(current_user):
-            assigned_user_id = request.assigned_user_id
-            validate_user_reference(db, assigned_user_id)
-        else:
-            if request.assigned_user_id not in (None, current_user.id):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Only administrators and managers can assign surveys to other users",
-                )
-            assigned_user_id = current_user.id
+    if current_user is not None:
+        role = current_user.role.strip().casefold()
+        if role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Sales Representatives cannot create site surveys.",
+            )
+        assigned_user_id = request.assigned_user_id
+        validate_user_reference(db, assigned_user_id)
         customer_id = request.customer_id
         project_id = request.project_id
         lead_id = request.lead_id
@@ -356,23 +339,10 @@ def create_survey(
         validate_lead_reference(db, lead_id)
         survey_status = request.status if request.status else "Scheduled"
         assigned_to = request.assigned_to.strip() if request.assigned_to else "Rahul"
-    elif current_user is not None and current_user.role.lower() == "customer":
-        customer = customer_profile_for_user(db, current_user)
-        if request.customer_id is not None and (
-            customer is None or request.customer_id != customer.id
-        ):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer access denied")
-        if request.project_id is not None:
-            if customer is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-            validate_project_reference(db, request.project_id, customer_id=customer.id)
-        customer_id = customer.id if customer is not None else None
-        project_id = request.project_id
-        survey_status = "Scheduled"
-        assigned_to = "Rahul"
     else:
         customer_id = None
         project_id = None
+        lead_id = None
         assigned_user_id = None
         survey_status = "Scheduled"
         assigned_to = "Rahul"
@@ -459,7 +429,7 @@ def create_survey(
 )
 def get_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager", "Sales Rep", "Support", "Customer"])),
+    current_user: User = Depends(require_roles(["Admin", "Sales Rep"])),
     db: Session = Depends(get_db),
 ):
     survey = accessible_surveys_query(db, current_user).filter(SiteSurvey.id == survey_id).first()
@@ -476,7 +446,7 @@ def get_survey(
 )
 def start_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
@@ -499,7 +469,7 @@ def start_survey(
 def complete_survey(
     survey_id: int,
     request: Optional[SiteSurveyCompleteRequest] = None,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     survey = db.query(SiteSurvey).filter(SiteSurvey.id == survey_id).first()
@@ -526,7 +496,7 @@ def complete_survey(
 )
 def cancel_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     result = CRMService.site_survey_cancel_workflow(db, survey_id, current_user)
@@ -545,7 +515,7 @@ def cancel_survey(
 def update_survey(
     survey_id: int,
     request: SiteSurveyUpdate,
-    current_user: User = Depends(require_roles(STAFF_ROLES)),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     survey = accessible_surveys_query(db, current_user).filter(SiteSurvey.id == survey_id).first()
@@ -644,7 +614,7 @@ def update_survey(
 )
 def delete_survey(
     survey_id: int,
-    current_user: User = Depends(require_roles(["Admin", "Manager"])),
+    current_user: User = Depends(require_roles(["Admin"])),
     db: Session = Depends(get_db),
 ):
     survey = db.query(SiteSurvey).filter(
