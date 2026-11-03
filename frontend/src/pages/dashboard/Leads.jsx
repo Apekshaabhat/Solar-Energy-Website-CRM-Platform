@@ -65,7 +65,7 @@ function toForm(lead) {
     name: lead.name || "",
     contact: lead.contact || "",
     location: lead.location || "",
-    propertyType: lead.propertyType || "Residential",
+    propertyType: lead.propertyType || lead.property_type || "Residential",
     source: lead.source || "Website",
     status: lead.status || "New",
   };
@@ -77,11 +77,11 @@ function downloadCsv(filename, rows) {
     lead.name,
     lead.contact,
     lead.location,
-    lead.propertyType,
+    lead.propertyType || lead.property_type || "Residential",
     lead.source,
     lead.date || lead.createdAt,
     lead.status,
-    lead.customerId || "",
+    lead.customerId || lead.customer_id || "",
   ]);
   const csv = [headers, ...values]
     .map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(","))
@@ -204,13 +204,14 @@ export default function Leads() {
 
   function openScheduleModal(lead) {
     if (isSalesRep) return;
+    const pType = lead.propertyType || lead.property_type || "Residential";
     setSurveyLead(lead);
     setSurveyForm({
       surveyDate: todayISO(),
       timeSlot: "10:00 AM",
       assignedTo: "Rahul",
-      roofInformation: lead.propertyType === "Commercial" ? "Flat RCC Roof" : "Sloped Tile / RCC",
-      capacityEstimate: lead.propertyType === "Commercial" ? "25 kW" : "5 kW",
+      roofInformation: pType === "Commercial" ? "Flat RCC Roof" : "Sloped Tile / RCC",
+      capacityEstimate: pType === "Commercial" ? "25 kW" : "5 kW",
       notes: `Site survey for lead #${lead.id} (${lead.name})`,
     });
     setScheduleModalOpen(true);
@@ -218,13 +219,14 @@ export default function Leads() {
 
   function openConvertModal(lead) {
     if (isSalesRep) return;
+    const pType = lead.propertyType || lead.property_type || "Residential";
     setConvertLead(lead);
     setConvertForm({
       projectName: `${lead.name} Solar Project`,
-      category: lead.propertyType || "Residential",
-      capacity: lead.propertyType === "Commercial" ? "25 kW" : "5 kW",
-      capacityKW: lead.propertyType === "Commercial" ? "25.0" : "5.0",
-      estimatedCost: lead.propertyType === "Commercial" ? "1200000" : "350000",
+      category: pType,
+      capacity: pType === "Commercial" ? "25 kW" : "5 kW",
+      capacityKW: pType === "Commercial" ? "25.0" : "5.0",
+      estimatedCost: pType === "Commercial" ? "1200000" : "350000",
     });
     setConvertModalOpen(true);
   }
@@ -434,31 +436,46 @@ export default function Leads() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-line dark:divide-[#293227] text-ink-800 dark:text-[#F3F6F1] font-medium">
-                {leads.map((lead) => (
-                  <tr key={lead.id} className="hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
-                    <td className="py-3.5 px-4 font-semibold text-ink-900 dark:text-[#F3F6F1]">
-                      <div>{lead.name}</div>
-                      {lead.customerId && (
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/dashboard/customers?id=${lead.customerId}`)}
-                          className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer"
-                        >
-                          <UserCheck className="w-3 h-3" />
-                          Customer #{lead.customerId}
-                        </button>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{lead.contact}</td>
-                    <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{lead.location}</td>
-                    <td className="py-3.5 px-4">{lead.propertyType}</td>
-                    <td className="py-3.5 px-4 text-ink-500 dark:text-[#8A968C]">{lead.source}</td>
-                    <td className="py-3.5 px-4 text-ink-500 dark:text-[#8A968C] text-xs">{lead.date || lead.createdAt}</td>
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-col items-start gap-1">
-                        <StatusBadge status={lead.status} />
-                      </div>
-                    </td>
+                {leads.map((lead) => {
+                  const leadCustomerId = lead.customerId || lead.customer_id;
+                  const leadPropertyType = lead.propertyType || lead.property_type || "Residential";
+                  return (
+                    <tr key={lead.id} className="hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
+                      <td className="py-3.5 px-4 font-semibold text-ink-900 dark:text-[#F3F6F1]">
+                        <div>{lead.name}</div>
+                        {leadCustomerId && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/dashboard/customers?id=${leadCustomerId}`)}
+                            className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer"
+                            title={`View Customer #${leadCustomerId} in CRM`}
+                          >
+                            <UserCheck className="w-3 h-3 flex-shrink-0" />
+                            Customer #{leadCustomerId}
+                          </button>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{lead.contact}</td>
+                      <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{lead.location}</td>
+                      <td className="py-3.5 px-4">{leadPropertyType}</td>
+                      <td className="py-3.5 px-4 text-ink-500 dark:text-[#8A968C]">{lead.source}</td>
+                      <td className="py-3.5 px-4 text-ink-500 dark:text-[#8A968C] text-xs">{lead.date || lead.createdAt}</td>
+                      <td className="py-3.5 px-4">
+                        <div className="flex flex-col items-start gap-1">
+                          <StatusBadge status={lead.status} />
+                          {leadCustomerId && (
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/dashboard/customers?id=${leadCustomerId}`)}
+                              className="inline-flex items-center gap-1 text-[11px] font-medium text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer"
+                              title={`View Customer #${leadCustomerId} in CRM`}
+                            >
+                              <UserCheck className="w-3 h-3 flex-shrink-0" />
+                              Customer #{leadCustomerId}
+                            </button>
+                          )}
+                        </div>
+                      </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         {isSalesRep ? (
@@ -632,7 +649,8 @@ export default function Leads() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                );
+              })}
                 {!loading && leads.length === 0 && (
                   <tr>
                     <td colSpan={8} className="py-10 text-center text-sm text-ink-500">
@@ -658,7 +676,7 @@ export default function Leads() {
           {isSalesRep && editingLead && (
             <div className="rounded-xl border border-blue-200 bg-blue-50 dark:bg-blue-950/20 px-3.5 py-2.5 text-xs text-blue-700 dark:text-blue-300 flex items-center justify-between">
               <span>Representative View-Only Mode — Status: <strong>{editingLead?.status}</strong></span>
-              {editingLead?.customerId && <span>Customer #{editingLead.customerId}</span>}
+              {(editingLead?.customerId || editingLead?.customer_id) && <span>Customer #{editingLead?.customerId || editingLead?.customer_id}</span>}
             </div>
           )}
 
@@ -724,7 +742,7 @@ export default function Leads() {
       >
         <form onSubmit={handleScheduleSurveySubmit} className="space-y-4">
           <p className="text-xs text-ink-500">
-            This will schedule a site survey linked to Customer #{surveyLead?.customerId || "Auto-Created"} and advance this lead to "Site Survey".
+            This will schedule a site survey linked to Customer #{(surveyLead?.customerId || surveyLead?.customer_id) || "Auto-Created"} and advance this lead to "Site Survey".
           </p>
 
           <div className="grid grid-cols-2 gap-3">
@@ -811,7 +829,7 @@ export default function Leads() {
       >
         <form onSubmit={handleConvertSubmit} className="space-y-4">
           <p className="text-xs text-ink-500">
-            This will mark Lead #{convertLead?.id} as Converted, create an active solar Project for Customer #{convertLead?.customerId || "Auto-Created"}, and update your CRM pipeline.
+            This will mark Lead #{convertLead?.id} as Converted, create an active solar Project for Customer #{(convertLead?.customerId || convertLead?.customer_id) || "Auto-Created"}, and update your CRM pipeline.
           </p>
 
           <FormField label="Project Name" required>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { Edit2, Calendar, FolderOpen, Users, Clock, MapPin, Phone, Mail, Building } from "lucide-react";
+import { Edit2, Calendar, FolderOpen, Users, Clock, MapPin, Phone, Mail, Building, UserCheck } from "lucide-react";
 import PageHeader from "../../components/dashboard/PageHeader";
 
 import StatusBadge from "../../components/dashboard/StatusBadge";
@@ -151,63 +151,81 @@ export default function Customers() {
         </p>
 
         <div className="overflow-x-auto no-scrollbar -mx-2">
-          <table className="w-full text-sm min-w-[860px]">
+          <table className="w-full text-sm min-w-[820px]">
             <thead>
               <tr className="text-left text-ink-400 dark:text-[#8A968C] text-xs uppercase tracking-wide">
                 <th className="px-2 pb-3 font-medium">ID</th>
                 <th className="px-2 pb-3 font-medium">Name</th>
                 <th className="px-2 pb-3 font-medium">Contact</th>
                 <th className="px-2 pb-3 font-medium">Location</th>
-                <th className="px-2 pb-3 font-medium">Property Type</th>
                 <th className="px-2 pb-3 font-medium">Total Projects</th>
-                <th className="px-2 pb-3 font-medium">Customer Since</th>
+                <th className="px-2 pb-3 font-medium">Created By</th>
                 <th className="px-2 pb-3 font-medium">Status</th>
                 <th className="px-2 pb-3 font-medium text-right">Action</th>
               </tr>
             </thead>
             <tbody className="text-ink-800 dark:text-[#F3F6F1]">
-              {customers.map((customer, i) => (
-                <tr key={customer.id} className="border-t border-line dark:border-[#293227] hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
-                  <td className="px-2 py-3 text-ink-400 font-mono text-xs">#{customer.id}</td>
-                  <td className="px-2 py-3 font-medium text-ink-900 dark:text-[#F3F6F1] whitespace-nowrap">
-                    {customer.name}
-                  </td>
-                  <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB] whitespace-nowrap">{customer.contact}</td>
-                  <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB]">{customer.location}</td>
-                  <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB]">{customer.propertyType}</td>
-                  <td className="px-2 py-3">
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-leaf-50 text-leaf-700 dark:bg-leaf-950/40 dark:text-leaf-300">
-                      {customer.totalProjects} {customer.totalProjects === 1 ? "project" : "projects"}
-                    </span>
-                  </td>
-                  <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB] whitespace-nowrap">{customer.customerSince}</td>
-                  <td className="px-2 py-3">
-                    <StatusBadge status={customer.status} />
-                  </td>
-                  <td className="px-2 py-3 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openCustomerOverview(customer)}
-                        className="text-leaf-600 dark:text-leaf-400 font-medium hover:underline text-xs bg-leaf-50 dark:bg-leaf-950/40 px-2.5 py-1 rounded-lg cursor-pointer"
-                      >
-                        View 360°
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(customer)}
-                        className="text-ink-400 hover:text-ink-700 dark:hover:text-[#F3F6F1] p-1"
-                        title="Edit Customer"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {customers.map((customer, i) => {
+                const totalProj = customer.totalProjects ?? customer.total_projects ?? 0;
+                const createdByName = customer.createdByName || customer.createdBy || "Website / System";
+                const createdByRole = customer.createdByRole;
+                return (
+                  <tr key={customer.id} className="border-t border-line dark:border-[#293227] hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
+                    <td className="px-2 py-3 text-ink-400 font-mono text-xs">#{customer.id}</td>
+                    <td className="px-2 py-3 font-medium text-ink-900 dark:text-[#F3F6F1] whitespace-nowrap">
+                      {customer.name}
+                    </td>
+                    <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB] whitespace-nowrap">{customer.contact}</td>
+                    <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB]">{customer.location}</td>
+                    <td className="px-2 py-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-leaf-50 text-leaf-700 dark:bg-leaf-950/40 dark:text-leaf-300">
+                        {totalProj} {totalProj === 1 ? "project" : "projects"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-3 whitespace-nowrap">
+                      <div className="flex flex-col items-start gap-0.5">
+                        <span className="font-medium text-xs text-ink-800 dark:text-[#E0E7E1]">{createdByName}</span>
+                        {createdByRole && (
+                          <span
+                            className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold ${
+                              createdByRole === "Admin"
+                                ? "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/40"
+                                : "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40"
+                            }`}
+                          >
+                            {createdByRole}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-2 py-3">
+                      <StatusBadge status={customer.status} />
+                    </td>
+                    <td className="px-2 py-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openCustomerOverview(customer)}
+                          className="text-leaf-600 dark:text-leaf-400 font-medium hover:underline text-xs bg-leaf-50 dark:bg-leaf-950/40 px-2.5 py-1 rounded-lg cursor-pointer"
+                        >
+                          View 360°
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openEditModal(customer)}
+                          className="text-ink-400 hover:text-ink-700 dark:hover:text-[#F3F6F1] p-1"
+                          title="Edit Customer"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
               {!loading && customers.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="py-10 text-center text-sm text-ink-500">
+                  <td colSpan={8} className="py-10 text-center text-sm text-ink-500">
                     No customers found.
                   </td>
                 </tr>
@@ -238,7 +256,22 @@ export default function Customers() {
                 <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5" /> {overviewCustomer?.contact}</span>
                 {overviewCustomer?.email && <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5" /> {overviewCustomer?.email}</span>}
                 <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5" /> {overviewCustomer?.location}</span>
-                <span className="flex items-center gap-1"><Building className="w-3.5 h-3.5" /> {overviewCustomer?.propertyType}</span>
+                <span className="flex items-center gap-1"><Building className="w-3.5 h-3.5" /> {overviewCustomer?.propertyType || overviewCustomer?.property_type}</span>
+                {(overviewCustomer?.createdByName || overviewCustomer?.createdBy) && (
+                  <span className="flex items-center gap-1">
+                    <UserCheck className="w-3.5 h-3.5 text-leaf-600 dark:text-leaf-400" />
+                    Created by: <strong className="text-ink-800 dark:text-[#F3F6F1]">{overviewCustomer.createdByName || overviewCustomer.createdBy}</strong>
+                    {overviewCustomer.createdByRole && (
+                      <span className={`inline-flex items-center px-1.5 py-0.2 rounded text-[10px] font-semibold ${
+                        overviewCustomer.createdByRole === "Admin"
+                          ? "bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 border border-purple-200/60 dark:border-purple-800/40"
+                          : "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40"
+                      }`}>
+                        {overviewCustomer.createdByRole}
+                      </span>
+                    )}
+                  </span>
+                )}
               </div>
             </div>
             <button

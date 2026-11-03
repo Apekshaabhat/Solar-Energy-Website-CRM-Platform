@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { toCustomer } from "../services/mappers";
 
 export const customersApi = {
   async getCustomers(params = {}) {
@@ -18,11 +19,18 @@ export const customersApi = {
 
     const queryString = query.toString();
     const url = `/customers${queryString ? `?${queryString}` : ""}`;
-    return await apiClient(url);
+    const response = await apiClient(url);
+    if (response && Array.isArray(response.items)) {
+      response.items = response.items.map(toCustomer);
+    } else if (Array.isArray(response)) {
+      return response.map(toCustomer);
+    }
+    return response;
   },
 
   async getCustomer(id) {
-    return await apiClient(`/customers/${id}`);
+    const response = await apiClient(`/customers/${id}`);
+    return response ? toCustomer(response) : response;
   },
 
   async createCustomer(data) {

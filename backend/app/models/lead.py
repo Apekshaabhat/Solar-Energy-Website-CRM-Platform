@@ -18,12 +18,19 @@ class Lead(Base):
     notes = Column(Text, nullable=True)
     estimated_value = Column(Float, nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_leads_created_by_user_id_users"),
+        nullable=True,
+        index=True,
+    )
     customer_id = Column(Integer, ForeignKey("customers.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     # Relationships
     assigned_user = relationship("User", back_populates="leads", foreign_keys=[assigned_user_id])
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
     customer = relationship("Customer", back_populates="leads", foreign_keys=[customer_id])
     site_surveys = relationship("SiteSurvey", back_populates="lead")
     projects = relationship("Project", back_populates="source_lead")

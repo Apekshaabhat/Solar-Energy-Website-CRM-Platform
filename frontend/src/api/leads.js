@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { toLead } from "../services/mappers";
 
 export const leadsApi = {
   async getLeads(params = {}) {
@@ -21,11 +22,16 @@ export const leadsApi = {
 
     const queryString = query.toString();
     const url = `/leads${queryString ? `?${queryString}` : ""}`;
-    return await apiClient(url);
+    const response = await apiClient(url);
+    if (response && Array.isArray(response.items)) {
+      response.items = response.items.map(toLead);
+    }
+    return response;
   },
 
   async getLead(id) {
-    return await apiClient(`/leads/${id}`);
+    const response = await apiClient(`/leads/${id}`);
+    return response ? toLead(response) : response;
   },
 
   async createLead(data) {

@@ -218,6 +218,8 @@ class CRMService:
             )
             if existing:
                 lead.customer_id = existing.id
+                if not existing.created_by_user_id and (lead.created_by_user_id or lead.assigned_user_id):
+                    existing.created_by_user_id = lead.created_by_user_id or lead.assigned_user_id
                 if existing.status != "Active":
                     existing.status = "Active"
                 return existing
@@ -233,6 +235,7 @@ class CRMService:
             status="Active",
             customer_since=datetime.now(timezone.utc).strftime("%d %b %Y"),
             assigned_user_id=lead.assigned_user_id,
+            created_by_user_id=lead.created_by_user_id or lead.assigned_user_id,
         )
         db.add(customer)
         db.flush()  # populate customer.id
@@ -1071,6 +1074,16 @@ class CRMService:
             for a in activities
         ]
 
+        creator = customer.created_by_user or customer.assigned_user
+        if not creator and leads:
+            first_lead = leads[0]
+            creator = first_lead.created_by_user or first_lead.assigned_user
+
+        created_by_user_id = creator.id if creator else None
+        created_by_name = creator.name if creator else "Website / System"
+        created_by_role = creator.role if creator else "System"
+        created_by = f"{creator.name} ({creator.role})" if creator else "Website / System"
+
         return {
             "id": customer.id,
             "name": customer.name,
@@ -1082,6 +1095,10 @@ class CRMService:
             "status": customer.status,
             "customer_since": customer.customer_since,
             "assigned_user_id": customer.assigned_user_id,
+            "created_by_user_id": created_by_user_id,
+            "created_by_name": created_by_name,
+            "created_by_role": created_by_role,
+            "created_by": created_by,
             "total_projects": len(projects),
             "created_at": customer.created_at,
             "updated_at": customer.updated_at,

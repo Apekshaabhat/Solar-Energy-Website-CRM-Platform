@@ -102,6 +102,16 @@ def build_lead_response(lead: Lead, db: Session) -> LeadResponse:
         resp.customer_name = lead.customer.name
     resp.surveys_count = db.query(func.count(SiteSurvey.id)).filter(SiteSurvey.lead_id == lead.id).scalar() or 0
     resp.projects_count = db.query(func.count(Project.id)).filter(Project.source_lead_id == lead.id).scalar() or 0
+    creator = lead.created_by_user or lead.assigned_user
+    if creator:
+        resp.created_by_user_id = creator.id
+        resp.created_by_name = creator.name
+        resp.created_by_role = creator.role
+        resp.created_by = f"{creator.name} ({creator.role})"
+    else:
+        resp.created_by = "Website / System"
+        resp.created_by_name = "Website / System"
+        resp.created_by_role = "System"
     return resp
 
 
@@ -210,6 +220,7 @@ def create_lead(
         notes=request.notes,
         estimated_value=request.estimated_value,
         assigned_user_id=assigned_user_id,
+        created_by_user_id=current_user.id if current_user else request.created_by_user_id,
         customer_id=request.customer_id if is_staff else None,
     )
     db.add(lead)

@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { toProject } from "../services/mappers";
 
 export const projectsApi = {
   async getProjects(params = {}) {
@@ -15,11 +16,19 @@ export const projectsApi = {
 
     const queryString = query.toString();
     const url = `/projects${queryString ? `?${queryString}` : ""}`;
-    return await apiClient(url);
+    const response = await apiClient(url);
+    if (Array.isArray(response)) {
+      return response.map(toProject);
+    }
+    if (response && Array.isArray(response.items)) {
+      response.items = response.items.map(toProject);
+    }
+    return response;
   },
 
   async getProject(id) {
-    return await apiClient(`/projects/${id}`);
+    const response = await apiClient(`/projects/${id}`);
+    return response ? toProject(response) : response;
   },
 
   async createProject(data) {

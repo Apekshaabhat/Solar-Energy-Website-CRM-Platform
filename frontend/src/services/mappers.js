@@ -1,11 +1,17 @@
 export function toLead(row) {
+  if (!row) return row;
   return {
     ...row,
-    propertyType: row.property_type ?? row.propertyType,
+    propertyType: row.property_type ?? row.propertyType ?? "Residential",
     estimatedValue: row.estimated_value ?? row.estimatedValue,
     assignedUserId: row.assigned_user_id ?? row.assignedUserId,
     customerId: row.customer_id ?? row.customerId,
+    customerName: row.customer_name ?? row.customerName,
     createdAt: row.date ?? row.createdAt ?? row.created_at,
+    createdBy: row.created_by ?? row.createdBy,
+    createdByName: row.created_by_name ?? row.createdByName,
+    createdByRole: row.created_by_role ?? row.createdByRole,
+    createdByUserId: row.created_by_user_id ?? row.createdByUserId,
   };
 }
 
@@ -27,11 +33,16 @@ export function toLeadPayload(form) {
 }
 
 export function toCustomer(row) {
+  if (!row) return row;
   return {
     ...row,
     propertyType: row.property_type ?? row.propertyType,
     totalProjects: row.total_projects ?? row.totalProjects ?? 0,
     customerSince: row.customer_since ?? row.customerSince,
+    createdBy: row.created_by ?? row.createdBy,
+    createdByName: row.created_by_name ?? row.createdByName,
+    createdByRole: row.created_by_role ?? row.createdByRole,
+    createdByUserId: row.created_by_user_id ?? row.createdByUserId,
   };
 }
 
@@ -49,10 +60,11 @@ export function toCustomerPayload(form) {
 }
 
 export function toSurvey(row) {
+  if (!row) return row;
   return {
     ...row,
     customerName: row.customer_name ?? row.customerName,
-    propertyType: row.property_type ?? row.propertyType,
+    propertyType: row.property_type ?? row.propertyType ?? "Residential",
     surveyDate: row.survey_date ?? row.surveyDate,
     timeSlot: row.time_slot ?? row.timeSlot,
     assignedTo: row.assigned_to ?? row.assignedTo,
@@ -85,8 +97,10 @@ export function toSurveyPayload(form) {
 }
 
 export function toProject(row) {
+  if (!row) return row;
   return {
     ...row,
+    category: row.category ?? "Residential",
     capacityKW: row.capacity_kw ?? row.capacityKW,
     customerId: row.customer_id ?? row.customerId,
     sourceLeadId: row.source_lead_id ?? row.sourceLeadId,
