@@ -77,6 +77,7 @@ class LeadBase(BaseModel):
 class LeadCreate(LeadBase):
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     customer_id: Optional[int] = Field(default=None, ge=1)
+    created_by_user_id: Optional[int] = Field(default=None, ge=1)
 
 
 class LeadUpdate(BaseModel):
@@ -92,6 +93,7 @@ class LeadUpdate(BaseModel):
     estimated_value: Optional[float] = Field(default=None, ge=0, le=1_000_000_000)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     customer_id: Optional[int] = Field(default=None, ge=1)
+    created_by_user_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("name", "contact", "location", mode="after")
     @classmethod
@@ -149,6 +151,10 @@ class LeadConvertRequest(BaseModel):
 class LeadResponse(LeadBase):
     id: int
     assigned_user_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    created_by_role: Optional[str] = None
+    created_by: Optional[str] = None
     customer_id: Optional[int] = None
     customer_name: Optional[str] = None
     surveys_count: Optional[int] = 0

@@ -102,15 +102,20 @@ def seed_data():
         # 2. Seed Customers
         if db.query(Customer).count() == 0:
             logger.info("Seeding customers...")
+            sales_reps = db.query(User).filter(User.role == "Sales Rep").order_by(User.id.asc()).all()
+            rep1_id = sales_reps[0].id if len(sales_reps) > 0 else (admin_user.id if admin_user else None)
+            rep2_id = sales_reps[1].id if len(sales_reps) > 1 else rep1_id
+            admin_id = admin_user.id if admin_user else None
+
             customers = [
-                Customer(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", customer_since="12 Sep 2026", status="Active", assigned_user_id=admin_user.id if admin_user else None),
-                Customer(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", customer_since="11 Sep 2026", status="Active", assigned_user_id=admin_user.id if admin_user else None),
-                Customer(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", customer_since="2 Aug 2026", status="Active"),
-                Customer(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", customer_since="15 Jul 2026", status="Inactive"),
-                Customer(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", customer_since="20 Jun 2026", status="Active"),
-                Customer(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", customer_since="18 Jun 2026", status="Active"),
-                Customer(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", customer_since="5 Jun 2026", status="Active"),
-                Customer(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", customer_since="28 May 2026", status="Inactive"),
+                Customer(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", customer_since="12 Sep 2026", status="Active", assigned_user_id=admin_id, created_by_user_id=admin_id),
+                Customer(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", customer_since="11 Sep 2026", status="Active", assigned_user_id=admin_id, created_by_user_id=admin_id),
+                Customer(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", customer_since="2 Aug 2026", status="Active", created_by_user_id=rep1_id),
+                Customer(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", customer_since="15 Jul 2026", status="Inactive", created_by_user_id=rep2_id),
+                Customer(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", customer_since="20 Jun 2026", status="Active", created_by_user_id=rep1_id),
+                Customer(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", customer_since="18 Jun 2026", status="Active", created_by_user_id=admin_id),
+                Customer(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", customer_since="5 Jun 2026", status="Active", created_by_user_id=rep2_id),
+                Customer(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", customer_since="28 May 2026", status="Inactive", created_by_user_id=rep1_id),
             ]
             db.add_all(customers)
             db.commit()
@@ -118,16 +123,21 @@ def seed_data():
         # 3. Seed Leads
         if db.query(Lead).count() == 0:
             logger.info("Seeding leads...")
+            sales_reps = db.query(User).filter(User.role == "Sales Rep").order_by(User.id.asc()).all()
+            rep1_id = sales_reps[0].id if len(sales_reps) > 0 else (admin_user.id if admin_user else None)
+            rep2_id = sales_reps[1].id if len(sales_reps) > 1 else rep1_id
+            admin_id = admin_user.id if admin_user else None
+
             cust_by_name = {c.name: c.id for c in db.query(Customer).all()}
             leads = [
-                Lead(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", source="Website", status="New", estimated_value=250000.0, customer_id=cust_by_name.get("Rohan Patil")),
-                Lead(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", source="Google Ads", status="Contacted", estimated_value=850000.0, customer_id=cust_by_name.get("Sneha Sharma")),
-                Lead(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", source="Referral", status="Site Survey", estimated_value=320000.0, customer_id=cust_by_name.get("Amit Verma")),
-                Lead(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", source="Website", status="Quoted", estimated_value=1500000.0, customer_id=cust_by_name.get("Priya Desai")),
-                Lead(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", source="Social Media", status="Converted", estimated_value=400000.0, customer_id=cust_by_name.get("Karan Mehta")),
-                Lead(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", source="Website", status="Lost", estimated_value=200000.0, customer_id=cust_by_name.get("Neha Gupta")),
-                Lead(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", source="Google Ads", status="New", estimated_value=1200000.0, customer_id=cust_by_name.get("Vikram Singh")),
-                Lead(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", source="Referral", status="Contacted", estimated_value=280000.0, customer_id=cust_by_name.get("Anjali Kulkarni")),
+                Lead(name="Rohan Patil", contact="+91 98765 43210", email="rohan@example.com", phone="+91 98765 43210", location="Mumbai", property_type="Residential", source="Website", status="New", estimated_value=250000.0, customer_id=cust_by_name.get("Rohan Patil"), created_by_user_id=admin_id),
+                Lead(name="Sneha Sharma", contact="+91 91234 56789", email="sneha@example.com", phone="+91 91234 56789", location="Pune", property_type="Commercial", source="Google Ads", status="Contacted", estimated_value=850000.0, customer_id=cust_by_name.get("Sneha Sharma"), created_by_user_id=admin_id),
+                Lead(name="Amit Verma", contact="+91 99887 66554", email="amit@example.com", phone="+91 99887 66554", location="Nashik", property_type="Residential", source="Referral", status="Site Survey", estimated_value=320000.0, customer_id=cust_by_name.get("Amit Verma"), created_by_user_id=rep1_id),
+                Lead(name="Priya Desai", contact="+91 97654 32109", email="priya@example.com", phone="+91 97654 32109", location="Thane", property_type="Industrial", source="Website", status="Quoted", estimated_value=1500000.0, customer_id=cust_by_name.get("Priya Desai"), created_by_user_id=rep2_id),
+                Lead(name="Karan Mehta", contact="+91 88990 12345", email="karan@example.com", phone="+91 88990 12345", location="Mumbai", property_type="Residential", source="Social Media", status="Converted", estimated_value=400000.0, customer_id=cust_by_name.get("Karan Mehta"), created_by_user_id=rep1_id),
+                Lead(name="Neha Gupta", contact="+91 98761 23456", email="neha@example.com", phone="+91 98761 23456", location="Pune", property_type="Residential", source="Website", status="Lost", estimated_value=200000.0, customer_id=cust_by_name.get("Neha Gupta"), created_by_user_id=admin_id),
+                Lead(name="Vikram Singh", contact="+91 90654 77889", email="vikram@example.com", phone="+91 90654 77889", location="Nagpur", property_type="Commercial", source="Google Ads", status="New", estimated_value=1200000.0, customer_id=cust_by_name.get("Vikram Singh"), created_by_user_id=rep2_id),
+                Lead(name="Anjali Kulkarni", contact="+91 88776 55443", email="anjali@example.com", phone="+91 88776 55443", location="Solapur", property_type="Residential", source="Referral", status="Contacted", estimated_value=280000.0, customer_id=cust_by_name.get("Anjali Kulkarni"), created_by_user_id=rep1_id),
             ]
             db.add_all(leads)
             db.commit()

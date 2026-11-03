@@ -118,6 +118,31 @@ def apply_customer_update(customer: Customer, update_data: dict) -> None:
         setattr(customer, field, val)
 
 
+def build_customer_response(c: Customer, db: Session) -> CustomerResponse:
+    resp = CustomerResponse.model_validate(c)
+    resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == c.id).scalar() or 0
+
+    creator = c.created_by_user
+    if not creator and c.assigned_user:
+        creator = c.assigned_user
+    if not creator:
+        lead = db.query(Lead).filter(Lead.customer_id == c.id).order_by(Lead.created_at.asc()).first()
+        if lead:
+            creator = lead.created_by_user or lead.assigned_user
+
+    if creator:
+        resp.created_by_user_id = creator.id
+        resp.created_by_name = creator.name
+        resp.created_by_role = creator.role
+        resp.created_by = f"{creator.name} ({creator.role})"
+    else:
+        resp.created_by = "Website / System"
+        resp.created_by_name = "Website / System"
+        resp.created_by_role = "System"
+
+    return resp
+
+
 @router.get(
     "",
     response_model=PaginatedResponse[CustomerResponse],
@@ -166,11 +191,7 @@ def list_customers(
         .all()
     )
 
-    items = []
-    for c in customers:
-        resp = CustomerResponse.model_validate(c)
-        resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == c.id).scalar() or 0
-        items.append(resp)
+    items = [build_customer_response(c, db) for c in customers]
 
     return PaginatedResponse(
         success=True,
@@ -217,6 +238,7 @@ def create_customer(
         status=request.status or "Active",
         customer_since=request.customer_since or datetime.now(timezone.utc).strftime("%d %b %Y"),
         assigned_user_id=assigned_user_id,
+        created_by_user_id=current_user.id if current_user else request.created_by_user_id,
         account_user_id=request.account_user_id if is_customer_manager(current_user) else None,
     )
     db.add(customer)
@@ -238,8 +260,7 @@ def create_customer(
     db.commit()
     db.refresh(customer)
 
-    resp = CustomerResponse.model_validate(customer)
-    resp.total_projects = 0
+    resp = build_customer_response(customer, db)
     return APIResponse(success=True, message="Customer created successfully", data=resp)
 
 
@@ -270,10 +291,7 @@ def get_my_customer_profile(
     db: Session = Depends(get_db),
 ):
     customer = get_linked_customer(db, current_user)
-    resp = CustomerResponse.model_validate(customer)
-    resp.total_projects = (
-        db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
-    )
+    resp = build_customer_response(customer, db)
     return APIResponse(success=True, data=resp)
 
 
@@ -451,8 +469,7 @@ def get_customer(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Customer not found")
     check_customer_access(customer, current_user, db)
 
-    resp = CustomerResponse.model_validate(customer)
-    resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
+    resp = build_customer_response(customer, db)
     return APIResponse(success=True, data=resp)
 
 
@@ -544,8 +561,7 @@ def update_customer(
     db.commit()
     db.refresh(customer)
 
-    resp = CustomerResponse.model_validate(customer)
-    resp.total_projects = db.query(func.count(Project.id)).filter(Project.customer_id == customer.id).scalar() or 0
+    resp = build_customer_response(customer, db)
     return APIResponse(success=True, message="Customer updated successfully", data=resp)
 
 

@@ -61,6 +61,7 @@ export default function SiteSurveys() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const isAdmin = user?.role?.toLowerCase()?.trim() === "admin";
+  const isSalesRep = !isAdmin;
   const { refreshToken, notifyCrmChange } = useDashboardData();
   const [surveys, setSurveys] = useState([]);
   const [tabCounts, setTabCounts] = useState({});
@@ -327,13 +328,6 @@ export default function SiteSurveys() {
                     },
                   },
                   {
-                    name: "surveyor",
-                    label: "Surveyor",
-                    value: surveyorFilter,
-                    options: ["All Surveyors", ...surveyors],
-                    onChange: setSurveyorFilter,
-                  },
-                  {
                     name: "propertyType",
                     label: "Property Type",
                     value: propertyFilter,
@@ -365,53 +359,60 @@ export default function SiteSurveys() {
                   <th className="py-3.5 px-4">Location</th>
                   <th className="py-3.5 px-4">Property</th>
                   <th className="py-3.5 px-4">Date & Time</th>
-                  <th className="py-3.5 px-4">Surveyor</th>
                   <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4 text-right">Workflow Actions</th>
+                  <th className="py-3.5 px-4 text-right">{isSalesRep ? "Survey Status & Updates" : "Workflow Actions"}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line dark:divide-[#293227] text-ink-800 dark:text-[#F3F6F1] font-medium">
                 {!loading && filtered.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-sm text-ink-500">
+                    <td colSpan={6} className="py-10 text-center text-sm text-ink-500">
                       No site surveys found.
                     </td>
                   </tr>
                 )}
                 {loading && (
                   <tr>
-                    <td colSpan={7} className="py-10 text-center text-sm text-ink-500">
+                    <td colSpan={6} className="py-10 text-center text-sm text-ink-500">
                       Loading site surveys...
                     </td>
                   </tr>
                 )}
-                {!loading && filtered.map((survey) => (
-                  <tr key={survey.id} className="hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
-                    <td className="py-3.5 px-4 font-semibold text-ink-900 dark:text-[#F3F6F1]">
-                      <div>{survey.customerName}</div>
-                      {survey.customerId && (
-                        <button
-                          type="button"
-                          onClick={() => navigate(`/dashboard/customers?id=${survey.customerId}`)}
-                          className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer"
-                        >
-                          <UserCheck className="w-3 h-3" />
-                          Customer #{survey.customerId}
-                        </button>
-                      )}
-                      {survey.leadId && (
-                        <span className="text-[11px] text-ink-400 block">From Lead #{survey.leadId}</span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{survey.location}</td>
-                    <td className="py-3.5 px-4">{survey.propertyType}</td>
-                    <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB] text-xs">
-                      {survey.surveyDate} at {survey.timeSlot}
-                    </td>
-                    <td className="py-3.5 px-4 text-ink-700 dark:text-[#B9C4BB]">{survey.assignedTo}</td>
-                    <td className="py-3.5 px-4">
-                      <StatusBadge status={survey.status} />
-                    </td>
+                {!loading && filtered.map((survey) => {
+                  const customerId = survey.customerId || survey.customer_id;
+                  const leadId = survey.leadId || survey.lead_id;
+                  const customerName = survey.customerName || survey.customer_name || "—";
+                  const propertyType = survey.propertyType || survey.property_type || "Residential";
+                  const surveyDate = survey.surveyDate || survey.survey_date || "—";
+                  const timeSlot = survey.timeSlot || survey.time_slot || "";
+
+                  return (
+                    <tr key={survey.id} className="hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
+                      <td className="py-3.5 px-4 font-semibold text-ink-900 dark:text-[#F3F6F1]">
+                        <div>{customerName}</div>
+                        {customerId && (
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/dashboard/customers?id=${customerId}`)}
+                            className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-medium text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer"
+                            title={`View Customer #${customerId} in CRM`}
+                          >
+                            <UserCheck className="w-3 h-3 flex-shrink-0" />
+                            Customer #{customerId}
+                          </button>
+                        )}
+                        {leadId && (
+                          <span className="text-[11px] text-ink-400 block font-normal">From Lead #{leadId}</span>
+                        )}
+                      </td>
+                      <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB]">{survey.location}</td>
+                      <td className="py-3.5 px-4">{propertyType}</td>
+                      <td className="py-3.5 px-4 text-ink-600 dark:text-[#B9C4BB] text-xs">
+                        {surveyDate}{timeSlot ? ` at ${timeSlot}` : ""}
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <StatusBadge status={survey.status} />
+                      </td>
                     <td className="relative py-3.5 px-4 text-right">
                       {isAdmin ? (
                         <div className="flex items-center justify-end gap-1.5">
@@ -482,7 +483,8 @@ export default function SiteSurveys() {
                       )}
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           </div>

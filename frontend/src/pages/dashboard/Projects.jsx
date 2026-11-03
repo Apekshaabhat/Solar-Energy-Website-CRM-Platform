@@ -220,7 +220,7 @@ export default function Projects() {
         </p>
 
         <div className="overflow-x-auto no-scrollbar -mx-2">
-          <table className="w-full text-sm min-w-[920px]">
+          <table className="w-full text-sm min-w-[820px]">
             <thead>
               <tr className="text-left text-ink-400 dark:text-[#8A968C] text-xs uppercase tracking-wide border-b border-line dark:border-[#293227]">
                 <th className="px-2 pb-3 font-medium">Project ID</th>
@@ -228,44 +228,46 @@ export default function Projects() {
                 <th className="px-2 pb-3 font-medium">Customer & Source</th>
                 <th className="px-2 pb-3 font-medium">Category</th>
                 <th className="px-2 pb-3 font-medium">Capacity</th>
-                <th className="px-2 pb-3 font-medium">Estimated Value</th>
                 <th className="px-2 pb-3 font-medium">Status</th>
                 <th className="px-2 pb-3 font-medium text-right">Workflow Actions</th>
               </tr>
             </thead>
             <tbody className="text-ink-800 dark:text-[#F3F6F1]">
-              {projects.map((project) => (
-                <tr key={project.id} className="border-t border-line dark:border-[#293227] hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
-                  <td className="px-2 py-3 text-ink-400 font-mono text-xs">#{project.id}</td>
-                  <td className="px-2 py-3 font-medium text-ink-900 dark:text-[#F3F6F1]">
-                    <div>{project.name}</div>
-                    <div className="text-xs text-ink-500 font-normal">{project.location}</div>
-                  </td>
-                  <td className="px-2 py-3">
-                    {project.customerId ? (
-                      <button
-                        type="button"
-                        onClick={() => navigate(`/dashboard/customers?id=${project.customerId}`)}
-                        className="inline-flex items-center gap-1 text-xs text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer font-medium"
-                      >
-                        <UserCheck className="w-3.5 h-3.5" />
-                        {project.customerName || `Customer #${project.customerId}`}
-                      </button>
-                    ) : (
-                      <span className="text-xs text-ink-400">Direct Customer</span>
-                    )}
-                    {project.sourceLeadId && (
-                      <span className="text-[11px] text-ink-400 block mt-0.5">From Lead #{project.sourceLeadId}</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB]">{project.category}</td>
-                  <td className="px-2 py-3 font-medium text-ink-800 dark:text-[#E0E7E1]">{project.capacity}</td>
-                  <td className="px-2 py-3 text-ink-700 dark:text-[#B9C4BB]">
-                    {project.estimatedCost ? `₹${Number(project.estimatedCost).toLocaleString("en-IN")}` : "—"}
-                  </td>
-                  <td className="px-2 py-3">
-                    <StatusBadge status={project.status} />
-                  </td>
+              {projects.map((project) => {
+                const customerId = project.customerId || project.customer_id;
+                const customerName = project.customerName || project.customer_name;
+                const sourceLeadId = project.sourceLeadId || project.source_lead_id;
+
+                return (
+                  <tr key={project.id} className="border-t border-line dark:border-[#293227] hover:bg-[#f9faf9] dark:hover:bg-[#152019] transition-colors">
+                    <td className="px-2 py-3 text-ink-400 font-mono text-xs">#{project.id}</td>
+                    <td className="px-2 py-3 font-medium text-ink-900 dark:text-[#F3F6F1]">
+                      <div>{project.name}</div>
+                      <div className="text-xs text-ink-500 font-normal">{project.location}</div>
+                    </td>
+                    <td className="px-2 py-3">
+                      {customerId ? (
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/dashboard/customers?id=${customerId}`)}
+                          className="inline-flex items-center gap-1 text-xs text-leaf-600 dark:text-leaf-400 hover:underline cursor-pointer font-medium"
+                          title={`View Customer #${customerId} in CRM`}
+                        >
+                          <UserCheck className="w-3.5 h-3.5 flex-shrink-0" />
+                          {customerName || `Customer #${customerId}`}
+                        </button>
+                      ) : (
+                        <span className="text-xs text-ink-400">Direct Customer</span>
+                      )}
+                      {sourceLeadId && (
+                        <span className="text-[11px] text-ink-400 block mt-0.5">From Lead #{sourceLeadId}</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-3 text-ink-600 dark:text-[#B9C4BB]">{project.category}</td>
+                    <td className="px-2 py-3 font-medium text-ink-800 dark:text-[#E0E7E1]">{project.capacity}</td>
+                    <td className="px-2 py-3">
+                      <StatusBadge status={project.status} />
+                    </td>
                   <td className="px-2 py-3 text-right">
                     {isAdmin ? (
                       <div className="flex items-center justify-end gap-1.5">
@@ -372,14 +374,15 @@ export default function Projects() {
                     )}
                   </td>
                 </tr>
-              ))}
-              {!loading && projects.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="py-10 text-center text-sm text-ink-500">
-                    No projects found. Projects are automatically provisioned when leads are converted.
-                  </td>
-                </tr>
-              )}
+              );
+            })}
+            {!loading && projects.length === 0 && (
+              <tr>
+                <td colSpan={7} className="py-10 text-center text-sm text-ink-500">
+                  No projects found. Projects are automatically provisioned when leads are converted.
+                </td>
+              </tr>
+            )}
             </tbody>
           </table>
         </div>

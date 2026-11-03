@@ -59,6 +59,7 @@ class CustomerBase(BaseModel):
 class CustomerCreate(CustomerBase):
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     account_user_id: Optional[int] = Field(default=None, ge=1)
+    created_by_user_id: Optional[int] = Field(default=None, ge=1)
 
 
 class CustomerUpdate(BaseModel):
@@ -72,6 +73,7 @@ class CustomerUpdate(BaseModel):
     customer_since: Optional[str] = Field(default=None, max_length=30)
     assigned_user_id: Optional[int] = Field(default=None, ge=1)
     account_user_id: Optional[int] = Field(default=None, ge=1)
+    created_by_user_id: Optional[int] = Field(default=None, ge=1)
 
     @field_validator("name", "contact", "location", mode="after")
     @classmethod
@@ -137,6 +139,10 @@ class CustomerResponse(CustomerBase):
     id: int
     assigned_user_id: Optional[int] = None
     account_user_id: Optional[int] = None
+    created_by_user_id: Optional[int] = None
+    created_by_name: Optional[str] = None
+    created_by_role: Optional[str] = None
+    created_by: Optional[str] = None
     total_projects: int = 0
     created_at: datetime
     updated_at: datetime

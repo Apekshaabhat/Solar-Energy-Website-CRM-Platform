@@ -1,4 +1,5 @@
 import apiClient from "./client";
+import { toSurvey } from "../services/mappers";
 
 export const siteSurveysApi = {
   async getSiteSurveys(params = {}) {
@@ -12,7 +13,13 @@ export const siteSurveysApi = {
 
     const queryString = query.toString();
     const url = `/site-surveys${queryString ? `?${queryString}` : ""}`;
-    return await apiClient(url);
+    const response = await apiClient(url);
+    if (response && Array.isArray(response.items)) {
+      response.items = response.items.map(toSurvey);
+    } else if (Array.isArray(response)) {
+      return response.map(toSurvey);
+    }
+    return response;
   },
 
   async exportCSV(params = {}) {
@@ -37,7 +44,8 @@ export const siteSurveysApi = {
   },
 
   async getSiteSurvey(id) {
-    return await apiClient(`/site-surveys/${id}`);
+    const response = await apiClient(`/site-surveys/${id}`);
+    return response ? toSurvey(response) : response;
   },
 
   async createSiteSurvey(data) {

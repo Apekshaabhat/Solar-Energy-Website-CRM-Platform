@@ -19,6 +19,12 @@ class Customer(Base):
     status = Column(String(50), default="Active", nullable=False)  # Active, Inactive
     customer_since = Column(String(50), nullable=True)
     assigned_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_by_user_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="SET NULL", name="fk_customers_created_by_user_id_users"),
+        nullable=True,
+        index=True,
+    )
     account_user_id = Column(
         Integer,
         ForeignKey(
@@ -33,6 +39,7 @@ class Customer(Base):
 
     # Relationships
     assigned_user = relationship("User", back_populates="customers", foreign_keys=[assigned_user_id])
+    created_by_user = relationship("User", foreign_keys=[created_by_user_id])
     account_user = relationship("User", back_populates="customer_profile", foreign_keys=[account_user_id])
     projects = relationship("Project", back_populates="customer")
     site_surveys = relationship("SiteSurvey", back_populates="customer")
