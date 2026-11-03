@@ -1,0 +1,6 @@
+{
+  "markdownlint.ignore": [
+    "**/README.md"
+  ]
+}
+
